@@ -1,0 +1,19 @@
+{
+  "name": "evy",
+  "displayName": "EVY",
+  "version": "1.0.0",
+  "description": "EVY for Claude Code: each session in a folder linked to one of your EVY spaces starts with that space's tasks, steer and progress, and the agent reports back through EVY's tools.",
+  "author": { "name": "EVY" },
+  "homepage": "https://evy.so",
+  "repository": "https://github.com/banzai2k/evy-plugins",
+  "license": "MIT",
+  "keywords": ["evy", "planning", "tasks", "mcp"],
+  "userConfig": {
+    "evy_api": {
+      "type": "string",
+      "title": "EVY address",
+      "description": "Where your EVY runs, without a path. EVY Desktop sets it during setup.",
+      "default": "https://ubuntu-8gb-nbg1-1.tail8a612f.ts.net:8443"
+    }
+  }
+}

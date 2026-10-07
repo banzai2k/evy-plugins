@@ -1,0 +1,33 @@
+#!/bin/bash
+# Start-of-session hook: in a folder linked to one of the person's EVY spaces, prints that space's context (open
+# tasks, the steer, recent decisions, progress), which the agent reads before the first message. Prints nothing,
+# and never fails the session, when EVY is not set up on this Mac, the folder belongs to no space, or EVY is out of
+# reach.
+. "$(dirname "$0")/evy-lib.sh"
+
+EVY_INPUT="$(cat)"
+session="$(evy_field session_id)"
+folder="${CLAUDE_PROJECT_DIR:-$(evy_field cwd)}"
+folder="${folder:-$PWD}"
+base="$(evy_base)" || exit 0
+token="$(evy_token "$EVY_KIND")" || exit 0
+[ -n "$token" ] || exit 0
+
+kind=chat
+[ "${COMPASS_RUNNER:-}" = "1" ] && kind=run
+repo="$(evy_repo_folder "$folder")"
+
+# The token goes to curl on stdin, never on its command line where other processes could read it.
+body="$(printf 'header = "Authorization: Bearer %s"\n' "$token" | curl -sS -K - --max-time 8 -G -w '\n%{http_code}' \
+  --data-urlencode "folder=$folder" --data-urlencode "repo_folder=$repo" \
+  --data-urlencode "kind=$kind" --data-urlencode "session=$session" \
+  "$base/runner/api/context" 2>/dev/null)" || exit 0
+status="${body##*$'\n'}"
+[ "$status" = "200" ] || exit 0
+
+printf '%s\n' "${body%$'\n'*}"
+if [ -n "$session" ]; then
+  printf '\nThis session is %s: pass it as `session` when you claim_task.\n' "$session"
+  dir="$(evy_session_dir "$session")" && mkdir -p "$dir" && : > "$dir/linked"
+fi
+exit 0

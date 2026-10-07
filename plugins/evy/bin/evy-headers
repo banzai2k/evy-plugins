@@ -1,0 +1,20 @@
+#!/bin/bash
+# The headers Claude Code (or Codex) sends to EVY's tools: this Mac's agent token, read from EVY Desktop's env file at
+# each connection, so it never sits in a config file, and the folder the session works in. Usage: evy-headers [folder]
+. "$(dirname "$0")/evy-lib.sh"
+
+folder="${1:-$PWD}"
+token="$(evy_token "$EVY_KIND")" || token=""
+[ -n "$token" ] || { echo '{}'; exit 0; }
+# The token goes only to the EVY this Mac is paired with, whatever address the plugin was given.
+if [ -n "${CLAUDE_CODE_MCP_SERVER_URL:-}" ]; then
+  base="$(evy_base)" || base=""
+  case "$CLAUDE_CODE_MCP_SERVER_URL" in "$base"/*) ;; *) echo '{}'; exit 0 ;; esac
+fi
+
+kind=chat
+[ "${COMPASS_RUNNER:-}" = "1" ] && kind=run
+out="{\"Authorization\":$(evy_json "Bearer $token"),\"X-EVY-Kind\":\"$kind\",\"X-EVY-Folder\":$(evy_json "$folder")"
+repo="$(evy_repo_folder "$folder")"
+[ -n "$repo" ] && out="$out,\"X-EVY-Repo-Folder\":$(evy_json "$repo")"
+printf '%s}\n' "$out"

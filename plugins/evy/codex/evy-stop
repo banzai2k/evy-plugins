@@ -1,0 +1,3 @@
+#!/bin/bash
+# Codex runs this without a shell, so the agent kind is set here rather than in its config.
+EVY_AGENT_KIND=codex exec "$(dirname "$0")/../bin/evy-stop" "$@"
