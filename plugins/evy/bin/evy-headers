@@ -6,10 +6,13 @@
 folder="${1:-$PWD}"
 token="$(evy_token "$EVY_KIND")" || token=""
 [ -n "$token" ] || { echo '{}'; exit 0; }
-# The token goes only to the EVY this Mac is paired with, whatever address the plugin was given.
+# The token goes only to the EVY this Mac is paired with, whatever address the plugin was given. Claude Code masks
+# any part of the address that equals a secret in its environment as REDACTED, so a masked part matches anything.
 if [ -n "${CLAUDE_CODE_MCP_SERVER_URL:-}" ]; then
   base="$(evy_base)" || base=""
-  case "$CLAUDE_CODE_MCP_SERVER_URL" in "$base"/*) ;; *) echo '{}'; exit 0 ;; esac
+  pattern="$(printf '%s' "$CLAUDE_CODE_MCP_SERVER_URL" | sed -e 's/[][?*\\]/\\&/g' -e 's/REDACTED/*/g')"
+  # shellcheck disable=SC2254
+  case "$base/mcp" in $pattern) ;; *) echo '{}'; exit 0 ;; esac
 fi
 
 kind=chat

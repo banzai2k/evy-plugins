@@ -1,7 +1,7 @@
 {
   "name": "evy",
   "displayName": "EVY",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "EVY for Claude Code: each session in a folder linked to one of your EVY spaces starts with that space's tasks, steer and progress, and the agent reports back through EVY's tools.",
   "author": { "name": "EVY" },
   "homepage": "https://evy.so",
