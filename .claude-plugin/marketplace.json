@@ -7,7 +7,7 @@
       "name": "evy",
       "source": "./plugins/evy",
       "description": "Each session in a folder linked to an EVY space starts with that space's tasks, and reports back through EVY's tools.",
-      "version": "1.0.1"
+      "version": "1.0.2"
     }
   ]
 }

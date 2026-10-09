@@ -15,6 +15,8 @@ EVY holds the person's spaces (one per company or area of life), with their goal
 - Never tick off the person's own tasks. Say what you did with `comment`.
 - You may change only the space of the folder you work in. Read the others when asked.
 - A folder that belongs to no space: ask the person which space, then `link_folder`.
+- An image: `make_image` uses the person's own image key and gives you the command that saves it where EVY's file rules put the task's files (on Codex, use Codex's own image generation instead). Give it an `OUTPUT:` line in the report.
+- The space's notes: when your context names a `Knowledge` folder (`~/Documents/<space>/Knowledge/`), the space's shared notes are Markdown files there. Search them (grep) before asking EVY or the person. They are a read-only copy: write notes in EVY, never in those files.
 
 ## Keeping EVY current
 - The person decided something with you: `record_decision`, what and why, at most 40 words.
