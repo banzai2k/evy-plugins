@@ -11,7 +11,9 @@ EVY holds the person's spaces (one per company or area of life), with their goal
 - Start an EVY task only when the person asks, or when it is queued for you. Call `claim_task` first, with the session id from your context, so no other session takes it.
 - Finish it with `report`: the result for someone who saw nothing before, deliverables included. Status `blocked` when you cannot go on.
 - Only the person can answer something: `ask`, one question, then stop.
-- New work that came up: `add_task`. Work for the person to decide on: `propose`.
+- Work you spot outside your task: `propose` it, for the person to decide. `add_task` only when the person asks for a task, and for an agent only when they asked you to hand the work off.
+- A task for an agent carries a `prompt` a fresh session can run from on its own (the task, the files or area, what done looks like) and a `done_when`.
+- Splitting an EVY task off into its own session (Claude's desktop app can): only a task you have not claimed, since one you hold stays with you. Put the task id in that session's brief. The new session calls `claim_task` with its own session id (from its context, or a short name of its own when there is none) and reports the task itself; the session that started it does not.
 - Never tick off the person's own tasks. Say what you did with `comment`.
 - You may change only the space of the folder you work in. Read the others when asked.
 - A folder that belongs to no space: ask the person which space, then `link_folder`.
