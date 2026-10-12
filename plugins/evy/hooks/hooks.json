@@ -8,6 +8,13 @@
         ]
       }
     ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/evy-prompt\"", "timeout": 8 }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [

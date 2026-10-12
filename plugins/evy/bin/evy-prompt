@@ -1,0 +1,32 @@
+#!/bin/bash
+# Prompt hook: before each message the person sends in a folder linked to a space, adds what is new in EVY for that
+# space since the session last heard (Updates lines from other sessions, the chat and agents' decisions, notes people
+# changed), each item once. Prints nothing when nothing is new, when EVY is out of reach (after 4 seconds at most), and
+# in runs.
+. "$(dirname "$0")/evy-lib.sh"
+
+[ "${COMPASS_RUNNER:-}" = "1" ] && exit 0
+EVY_INPUT="$(cat)"
+session="$(evy_field session_id)"
+dir="$(evy_session_dir "$session")" || exit 0
+[ -f "$dir/linked" ] || exit 0
+now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+since="$(cat "$dir/since" 2>/dev/null)"
+if [ -z "$since" ]; then
+  printf '%s' "$now" > "$dir/since"
+  exit 0
+fi
+base="$(evy_base)" || exit 0
+token="$(evy_token "$EVY_KIND")" || exit 0
+[ -n "$token" ] || exit 0
+folder="${CLAUDE_PROJECT_DIR:-$(evy_field cwd)}"
+folder="${folder:-$PWD}"
+
+body="$(printf 'header = "Authorization: Bearer %s"\n' "$token" | curl -sS -K - --max-time 4 -G -w '\n%{http_code}' \
+  --data-urlencode "folder=$folder" --data-urlencode "repo_folder=$(evy_repo_folder "$folder")" \
+  --data-urlencode "session=$session" --data-urlencode "since=$since" --data-urlencode "kind=chat" \
+  "$base/runner/api/news" 2>/dev/null)" || exit 0
+status="${body##*$'\n'}"
+case "$status" in 200|204) printf '%s' "$now" > "$dir/since" ;; *) exit 0 ;; esac
+[ "$status" = "200" ] && printf '%s\n' "${body%$'\n'*}"
+exit 0

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Gives Codex EVY's tools and its start-of-session and end-of-turn hooks, in ~/.codex/config.toml between EVY's
+# Gives Codex EVY's tools and its start-of-session, prompt and end-of-turn hooks, in ~/.codex/config.toml between EVY's
 # markers, replacing what an earlier run wrote there and touching nothing else. Codex runs a hook only after the
 # person trusts it once in /hooks, and again after every change to it. Untested until CX1 (Codex on a new Mac).
 # Usage: codex/setup.sh   (from the installed plugin; reads EVY's address from EVY Desktop's env file)
@@ -30,6 +30,12 @@ matcher = \"startup|clear|compact\"
 type = \"command\"
 command = \"$ROOT/codex/evy-session-start\"
 timeout = 15
+
+[[hooks.UserPromptSubmit]]
+[[hooks.UserPromptSubmit.hooks]]
+type = \"command\"
+command = \"$ROOT/codex/evy-prompt\"
+timeout = 8
 
 [[hooks.Stop]]
 [[hooks.Stop.hooks]]

@@ -1,31 +1,51 @@
 #!/bin/bash
-# End-of-turn hook: when this session changed something EVY has not heard about (a commit, or in a folder without
-# git a file it wrote) since its last report, decision or progress update, asks the agent once to update EVY. Only in
-# folders linked to a space, never in runs (they report through the task), and never twice for the same change.
+# End-of-turn hook: in a folder linked to a space, sends EVY what the session said since the last send (the person's
+# messages and the agent's answers, never tool output or file contents; evy-transcript.js picks them out), so EVY can
+# write what moved into the space's Updates note without the agent having to report it. Runs in the background and
+# never holds up the turn, never asks the agent anything, and never runs in runs (they report through their task).
+# Needs macOS's osascript; elsewhere it sends nothing. EVY_SHIP_WAIT=1 sends in the foreground (the tests).
 . "$(dirname "$0")/evy-lib.sh"
 
 [ "${COMPASS_RUNNER:-}" = "1" ] && exit 0
 EVY_INPUT="$(cat)"
-case "$(printf '%s' "$EVY_INPUT" | tr -d '[:space:]')" in *'"stop_hook_active":true'*) exit 0 ;; esac
-dir="$(evy_session_dir "$(evy_field session_id)")" || exit 0
+session="$(evy_field session_id)"
+dir="$(evy_session_dir "$session")" || exit 0
 [ -f "$dir/linked" ] || exit 0
 transcript="$(evy_field transcript_path)"
 [ -r "$transcript" ] || exit 0
-
+command -v osascript >/dev/null 2>&1 || exit 0
+base="$(evy_base)" || exit 0
+token="$(evy_token "$EVY_KIND")" || exit 0
+[ -n "$token" ] || exit 0
 folder="${CLAUDE_PROJECT_DIR:-$(evy_field cwd)}"
-if evy_in_git "${folder:-$PWD}"; then
-  changed='"name":"Bash".*git commit|"type":"function_call".*git commit'
-else
-  changed='"name":"(Edit|Write|MultiEdit|NotebookEdit)"|apply_patch'
-fi
-last_line() { grep -n -E "$1" "$transcript" | grep -E '"type":"(tool_use|function_call)"' | tail -n 1 | cut -d: -f1; }
-change="$(last_line "$changed")"
-told="$(last_line '"(mcp__plugin_evy_evy|mcp__evy)__(update_progress|record_decision|report)"')"
-asked="$(cat "$dir/asked" 2>/dev/null)"
-[ -n "$change" ] || exit 0
-[ "${told:-0}" -lt "$change" ] || exit 0
-[ "${asked:-0}" -lt "$change" ] || exit 0
-printf '%s' "$change" > "$dir/asked"
+folder="${folder:-$PWD}"
+reader="$(dirname "$0")/evy-transcript.js"
 
-printf '{"decision":"block","reason":%s}\n' "$(evy_json "EVY has not heard about what this session changed. If it changes where the space stands, call update_progress with the whole summary (at most 150 words, one plain fact per line), or record_decision for something the person decided. If it changes nothing there, stop without another word.")"
+ship() {
+  # One send at a time per session; a turn that ends while one runs is sent with the next.
+  mkdir "$dir/sending" 2>/dev/null || return 0
+  trap 'rm -rf "$dir/sending"' EXIT
+  local size from body status
+  size="$(wc -c < "$transcript" | tr -d ' ')"
+  from="$(cat "$dir/shipped" 2>/dev/null)"
+  from="${from:-0}"
+  [ "$size" -gt "$from" ] 2>/dev/null || return 0
+  tail -c +"$((from + 1))" "$transcript" | head -c "$((size - from))" |
+    osascript -l JavaScript "$reader" "$folder" "$(evy_repo_folder "$folder")" "$session" chat > "$dir/sending/body" 2>/dev/null
+  if [ ! -s "$dir/sending/body" ]; then
+    printf '%s' "$size" > "$dir/shipped"
+    return 0
+  fi
+  # The token goes to curl on stdin, never on its command line where other processes could read it.
+  status="$(printf 'header = "Authorization: Bearer %s"\n' "$token" | curl -sS -K - --max-time 20 -o /dev/null -w '%{http_code}' \
+    -H 'Content-Type: application/json' --data-binary @"$dir/sending/body" "$base/runner/api/turns" 2>/dev/null)"
+  # Kept for the next turn when EVY was out of reach, so nothing said is lost.
+  case "$status" in 2*) printf '%s' "$size" > "$dir/shipped" ;; esac
+}
+
+if [ "${EVY_SHIP_WAIT:-}" = "1" ]; then
+  ship
+else
+  (ship) </dev/null >/dev/null 2>&1 &
+fi
 exit 0
