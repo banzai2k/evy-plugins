@@ -84,5 +84,39 @@ evy_session_dir() {
   [ -n "$id" ] && printf '%s' "${TMPDIR:-/tmp}/evy-sessions/$id"
 }
 
+# This plugin's version, from its manifest, which the hooks name to EVY (TK2).
+evy_plugin_version() {
+  local manifest="$EVY_PLUGIN_ROOT/.claude-plugin/plugin.json"
+  sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$manifest" 2>/dev/null | head -n 1
+}
+
+# This session's id where the agent hands it to its helpers (Claude Code does), for EVY to tie tool calls to the
+# tasks the session claimed.
+evy_session_id() {
+  printf '%s' "${EVY_SESSION_ID:-${CLAUDE_CODE_SESSION_ID:-}}" | tr -cd 'A-Za-z0-9_.:-' | head -c 200
+}
+
+# Tells EVY a turn of session $1 started or ended ($2), for the tasks it claimed, in the background: never holds up
+# the turn. $3 is the folder.
+evy_presence() {
+  local session="$1" state="$2" folder="$3" base token
+  [ -n "$session" ] || return 0
+  base="$(evy_base)" || return 0
+  token="$(evy_token "$EVY_KIND")" || return 0
+  [ -n "$token" ] || return 0
+  # The token goes to curl on stdin, never on its command line where other processes could read it.
+  set -- curl -sS -K - --max-time 4 -o /dev/null --data-urlencode "session=$session" --data-urlencode "state=$state" \
+    --data-urlencode "kind=chat" --data-urlencode "folder=$folder" --data-urlencode "plugin=$(evy_plugin_version)" \
+    "$base/runner/api/presence"
+  if [ "${EVY_SHIP_WAIT:-}" = "1" ]; then
+    printf 'header = "Authorization: Bearer %s"\n' "$token" | "$@" 2>/dev/null
+  else
+    (printf 'header = "Authorization: Bearer %s"\n' "$token" | "$@") </dev/null >/dev/null 2>&1 &
+  fi
+  return 0
+}
+
+EVY_PLUGIN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
 # The agent kind these scripts serve: Codex's wrappers in codex/ set EVY_AGENT_KIND=codex.
 EVY_KIND="${EVY_AGENT_KIND:-claude-code}"

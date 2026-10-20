@@ -1,9 +1,11 @@
 #!/bin/bash
 # End-of-turn hook: in a folder linked to a space, sends EVY what the session said since the last send (the person's
 # messages and the agent's answers, never tool output or file contents; evy-transcript.js picks them out), so EVY can
-# write what moved into the space's Updates note without the agent having to report it. Runs in the background and
-# never holds up the turn, never asks the agent anything, and never runs in runs (they report through their task).
-# Needs macOS's osascript; elsewhere it sends nothing. EVY_SHIP_WAIT=1 sends in the foreground (the tests).
+# write what moved into the space's Updates note without the agent having to report it, and tells EVY the turn ended,
+# so To-do can say the session waits on the person. Runs in the background and never holds up the turn, never asks
+# the agent anything, and never runs in runs (they report through their task).
+# The turn's text needs macOS's osascript; elsewhere only the turn's end is sent. EVY_SHIP_WAIT=1 sends in the
+# foreground (the tests).
 . "$(dirname "$0")/evy-lib.sh"
 
 [ "${COMPASS_RUNNER:-}" = "1" ] && exit 0
@@ -11,14 +13,16 @@ EVY_INPUT="$(cat)"
 session="$(evy_field session_id)"
 dir="$(evy_session_dir "$session")" || exit 0
 [ -f "$dir/linked" ] || exit 0
+folder="${CLAUDE_PROJECT_DIR:-$(evy_field cwd)}"
+folder="${folder:-$PWD}"
+# The agent stopped and waits for the person (TK2), on any machine
+evy_presence "$session" ended "$folder"
 transcript="$(evy_field transcript_path)"
 [ -r "$transcript" ] || exit 0
 command -v osascript >/dev/null 2>&1 || exit 0
 base="$(evy_base)" || exit 0
 token="$(evy_token "$EVY_KIND")" || exit 0
 [ -n "$token" ] || exit 0
-folder="${CLAUDE_PROJECT_DIR:-$(evy_field cwd)}"
-folder="${folder:-$PWD}"
 reader="$(dirname "$0")/evy-transcript.js"
 
 ship() {

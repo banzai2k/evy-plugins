@@ -1,6 +1,7 @@
 #!/bin/bash
 # The headers Claude Code (or Codex) sends to EVY's tools: this Mac's agent token, read from EVY Desktop's env file at
-# each connection, so it never sits in a config file, and the folder the session works in. Usage: evy-headers [folder]
+# each connection, so it never sits in a config file, the folder the session works in, and the session's id where the
+# agent gives it (so EVY ties tool calls to the tasks the session claimed). Usage: evy-headers [folder]
 . "$(dirname "$0")/evy-lib.sh"
 
 folder="${1:-$PWD}"
@@ -20,4 +21,6 @@ kind=chat
 out="{\"Authorization\":$(evy_json "Bearer $token"),\"X-EVY-Kind\":\"$kind\",\"X-EVY-Folder\":$(evy_json "$folder")"
 repo="$(evy_repo_folder "$folder")"
 [ -n "$repo" ] && out="$out,\"X-EVY-Repo-Folder\":$(evy_json "$repo")"
+session="$(evy_session_id)"
+[ -n "$session" ] && out="$out,\"X-EVY-Session\":$(evy_json "$session")"
 printf '%s}\n' "$out"
