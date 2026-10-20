@@ -1,0 +1,3 @@
+#!/bin/bash
+# Codex runs the same folder guard as Claude Code (SYNC1).
+exec "$(dirname "$0")/../bin/evy-guard-folders" "$@"

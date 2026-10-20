@@ -42,6 +42,12 @@ timeout = 8
 type = \"command\"
 command = \"$ROOT/codex/evy-stop\"
 timeout = 10
+
+[[hooks.PreToolUse]]
+[[hooks.PreToolUse.hooks]]
+type = \"command\"
+command = \"$ROOT/bin/evy-guard-folders\"
+timeout = 5
 $end"
 
 kept="$(awk -v s="$start" -v e="$end" '$0==s{skip=1} !skip{print} $0==e{skip=0}' "$config")"

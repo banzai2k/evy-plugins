@@ -1,0 +1,97 @@
+#!/usr/bin/env python3
+# Refuses an edit inside EVY's numbered folders (SYNC1). The files there are
+# EVY's copy. Write the note with save_note, or finish the task with report.
+# Claude Code and Codex both run this before a tool call. A path with no
+# numbered folder is left alone, including a note whose text mentions one.
+import json
+import re
+import sys
+
+REASON = (
+    "EVY's numbered folders are a read-only copy. Write the note with save_note, "
+    "or finish the task with report. Do not edit 00 Start here.md, 01 Assets, "
+    "02 Private notes, 03 Plans and the other numbered folders, or Knowledge or Private notes."
+)
+NUMBERED = re.compile(r"^\d{2} ")
+NAMES = {"Knowledge", "Private notes", "00 Start here.md"}
+PATH_KEYS = {"file_path", "filepath", "path", "file", "filename", "target_file", "notebook_path", "target"}
+COMMAND_KEYS = {"command", "cmd", "script", "patch"}
+READ_TOOLS = {"read", "grep", "glob", "ls", "webfetch", "websearch", "notebookread", "view", "list_dir", "read_file"}
+WRITES = re.compile(
+    r"(?:^|[\s;&|(])(?:tee|rm|rmdir|mv|cp|mkdir|touch|ln|chmod|chown|truncate|dd|install|rsync|git\s+(?:checkout|restore|clean|reset))\b"
+    r"|\bsed\s+(?:-\w*i|--in-place)|\bperl\s+-\w*i|>>?\s*[^\s&|]"
+    r"|\b(?:write_text|write_bytes|open\([^)]*[\"'][wax]|writeFile|WriteFile|Set-Content|Out-File)"
+    r"|\*\*\* (?:Update|Add|Delete) File"
+)
+
+
+def segments(text):
+    return [part.strip(" '\"`") for part in text.replace("\\", "/").split("/")]
+
+
+PATH_HIT = re.compile(r"(?:^|[/\\])(\d{2} [^/\\\n]+|00 Start here\.md|Knowledge|Private notes)(?:[/\\]|$)")
+
+
+def numbered(text):
+    norm = text.replace("\\", "/")
+    if PATH_HIT.search("/" + norm) or PATH_HIT.search(norm):
+        return True
+    parts = segments(norm)
+    return any(NUMBERED.match(part) or part in NAMES for part in parts) and ("/" in norm or norm.startswith("~") or any(NUMBERED.match(part) for part in parts))
+
+
+def command_hits(text):
+    return bool(PATH_HIT.search(text.replace("\\", "/"))) and bool(WRITES.search(text))
+
+
+def walk(node, key=None):
+    if isinstance(node, dict):
+        for name, value in node.items():
+            yield from walk(value, name)
+    elif isinstance(node, list):
+        for value in node:
+            yield from walk(value, key)
+    elif isinstance(node, str) and key:
+        yield key, node
+
+
+def refused(payload):
+    tool = payload.get("tool_name") if isinstance(payload, dict) else None
+    if isinstance(tool, str) and tool.lower() in READ_TOOLS:
+        return False
+    for key, text in walk(payload):
+        name = key.lower()
+        if name in PATH_KEYS or name.endswith("path") or name.endswith("_file"):
+            if numbered(text):
+                return True
+        elif name in COMMAND_KEYS and command_hits(text):
+            return True
+    return False
+
+
+def deny():
+    print(json.dumps({
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": REASON,
+        }
+    }))
+    print(REASON, file=sys.stderr)
+    raise SystemExit(2)
+
+
+def main():
+    raw = sys.stdin.read()
+    if not raw.strip():
+        return
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return
+    if refused(payload):
+        deny()
+
+
+if __name__ == "__main__":
+    main()

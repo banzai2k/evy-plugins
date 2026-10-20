@@ -21,6 +21,13 @@
           { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/evy-stop\"", "timeout": 10 }
         ]
       }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/evy-guard-folders\"", "timeout": 5 }
+        ]
+      }
     ]
   }
 }
