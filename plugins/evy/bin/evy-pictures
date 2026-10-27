@@ -1,0 +1,67 @@
+#!/bin/bash
+# After EVY's report tool: uploads the picture files the report lists (a run's screenshots, images it made) to EVY, so
+# every page can show them (QA3). They often sit in the session's scratchpad, outside the space folders, where EVY
+# Desktop may not read them and no browser can. Asks EVY for the task's list as it stored it, then sends each picture
+# file found on this Mac; EVY points the entry at its stored copy. A Markdown file the report lists goes up the same
+# way and becomes a note waiting in Review, since a note never sits in Assets (QA8). Runs in the background and never
+# holds up the turn. Reads JSON with macOS's plutil; elsewhere it does nothing. EVY_SHIP_WAIT=1 sends in the foreground
+# (the tests).
+. "$(dirname "$0")/evy-lib.sh"
+
+EVY_INPUT="$(cat)"
+command -v plutil >/dev/null 2>&1 || exit 0
+# plutil prints a missing key's error on stdout, so a failed read must give nothing.
+json() { local value; value="$(printf '%s' "$2" | plutil -extract "$1" raw -o - - 2>/dev/null)" || return 1; printf '%s' "$value"; }
+id="$(json tool_input.id "$EVY_INPUT")"
+printf '%s' "$id" | grep -Eq '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' || exit 0
+base="$(evy_base)" || exit 0
+token="$(evy_token "$EVY_KIND")" || exit 0
+[ -n "$token" ] || exit 0
+
+MAX_BYTES=$((15 * 1024 * 1024))
+MAX_NOTE_BYTES=$((1024 * 1024))
+
+# The token goes to curl on stdin, never on its command line where other processes could read it.
+call() { printf 'header = "Authorization: Bearer %s"\n' "$token" | curl -sS -K - "$@"; }
+
+send() {
+  local task count i kind path type file size where max
+  task="$(call --max-time 10 "$base/runner/api/tasks/$id")" || return 0
+  count="$(json task.outputs "$task")" || return 0
+  i=0
+  while [ "$i" -lt "${count:-0}" ] 2>/dev/null; do
+    kind="$(json "task.outputs.$i.kind" "$task")"
+    path="$(json "task.outputs.$i.path" "$task")"
+    type="$(json "task.outputs.$i.type" "$task")"
+    i=$((i + 1))
+    # Only files: pictures (a screenshot, an image, or a file named like one) and Markdown notes.
+    [ "$kind" = file ] && [ -n "$path" ] || continue
+    where=pictures max=$MAX_BYTES
+    case "$type" in
+      screenshot | image) ;;
+      "")
+        if printf '%s' "$path" | grep -Eiq '\.(md|markdown|mdx)$'; then
+          where=notes max=$MAX_NOTE_BYTES
+        else
+          printf '%s' "$path" | grep -Eiq '\.(png|jpe?g|gif|webp|avif)$' || continue
+        fi
+        ;;
+      *) continue ;;
+    esac
+    file="$path"
+    case "$file" in "~/"*) file="$HOME/${file#\~/}" ;; esac
+    [ -f "$file" ] && [ -r "$file" ] || continue
+    size="$(wc -c < "$file" | tr -d ' ')"
+    [ "$size" -le "$max" ] 2>/dev/null || continue
+    call --max-time 60 -o /dev/null --form-string "path=$path" -F "file=@\"$file\"" \
+      "$base/runner/api/tasks/$id/$where" 2>/dev/null
+  done
+  return 0
+}
+
+if [ "${EVY_SHIP_WAIT:-}" = "1" ]; then
+  send
+else
+  (send) </dev/null >/dev/null 2>&1 &
+fi
+exit 0

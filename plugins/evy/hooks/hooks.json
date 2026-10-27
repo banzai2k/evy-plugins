@@ -28,6 +28,14 @@
           { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/evy-guard-folders\"", "timeout": 5 }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "mcp__.*evy.*__report",
+        "hooks": [
+          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/evy-pictures\"", "timeout": 10 }
+        ]
+      }
     ]
   }
 }
