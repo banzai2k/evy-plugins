@@ -1,0 +1,34 @@
+#!/bin/bash
+# After EVY's claim_task tool: tells EVY which session claimed the task (TK5). Claude Code gives the session's id to
+# its hooks but not to the helper that sends the tools' headers, so a claim whose agent passed no `session` reached EVY
+# without one, and the end of the session's turn never reached the task: it showed Working long after the session
+# stopped to wait on the person. Also marks the session as holding a task, so the prompt and Stop hooks tell EVY when
+# its turns start and end even in a folder no space is linked to. Runs in the background and never holds up the turn,
+# and never in runs (the runner names their session itself). EVY_SHIP_WAIT=1 sends in the foreground (the tests).
+. "$(dirname "$0")/evy-lib.sh"
+
+[ "${COMPASS_RUNNER:-}" = "1" ] && exit 0
+EVY_INPUT="$(cat)"
+session="$(evy_field session_id)"
+dir="$(evy_session_dir "$session")" || exit 0
+uuid='[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+# The task's id as the agent gave it, or, when it gave a handle (CP0), the first id in the tool's answer: the task's.
+input="$(printf '%s' "$EVY_INPUT" | tr -d '\n')"
+id="$(printf '%s' "$input" | sed -n 's/.*"tool_input"[[:space:]]*:[[:space:]]*{\([^}]*\)}.*/\1/p' |
+  grep -oE "\"id\"[[:space:]]*:[[:space:]]*\"$uuid\"" | grep -oE "$uuid" | head -n 1)"
+[ -n "$id" ] || id="$(printf '%s' "$input" | sed -n 's/.*"tool_response"//p' | grep -oE "$uuid" | head -n 1)"
+[ -n "$id" ] || exit 0
+mkdir -p "$dir" 2>/dev/null && : > "$dir/claimed"
+base="$(evy_base)" || exit 0
+token="$(evy_token "$EVY_KIND")" || exit 0
+[ -n "$token" ] || exit 0
+# The token goes to curl on stdin, never on its command line where other processes could read it.
+set -- curl -sS -K - --max-time 4 -o /dev/null --data-urlencode "session=$session" --data-urlencode "state=claimed" \
+  --data-urlencode "task=$id" --data-urlencode "kind=chat" --data-urlencode "plugin=$(evy_plugin_version)" \
+  "$base/runner/api/presence"
+if [ "${EVY_SHIP_WAIT:-}" = "1" ]; then
+  printf 'header = "Authorization: Bearer %s"\n' "$token" | "$@" 2>/dev/null
+else
+  (printf 'header = "Authorization: Bearer %s"\n' "$token" | "$@") </dev/null >/dev/null 2>&1 &
+fi
+exit 0

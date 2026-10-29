@@ -31,6 +31,12 @@
     ],
     "PostToolUse": [
       {
+        "matcher": "mcp__.*evy.*__claim_task",
+        "hooks": [
+          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/evy-claimed\"", "timeout": 10 }
+        ]
+      },
+      {
         "matcher": "mcp__.*evy.*__report",
         "hooks": [
           { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/evy-pictures\"", "timeout": 10 }

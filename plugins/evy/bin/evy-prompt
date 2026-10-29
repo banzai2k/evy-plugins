@@ -9,11 +9,12 @@
 EVY_INPUT="$(cat)"
 session="$(evy_field session_id)"
 dir="$(evy_session_dir "$session")" || exit 0
-[ -f "$dir/linked" ] || exit 0
 folder="${CLAUDE_PROJECT_DIR:-$(evy_field cwd)}"
 folder="${folder:-$PWD}"
-# The person sent a message: the session's turn started (TK2)
-evy_presence "$session" started "$folder"
+# The person sent a message: the session's turn started (TK2), also in a folder of no space once the session
+# claimed a task there (TK5)
+{ [ -f "$dir/linked" ] || [ -f "$dir/claimed" ]; } && evy_presence "$session" started "$folder"
+[ -f "$dir/linked" ] || exit 0
 now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 since="$(cat "$dir/since" 2>/dev/null)"
 if [ -z "$since" ]; then

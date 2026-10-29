@@ -12,11 +12,12 @@
 EVY_INPUT="$(cat)"
 session="$(evy_field session_id)"
 dir="$(evy_session_dir "$session")" || exit 0
-[ -f "$dir/linked" ] || exit 0
 folder="${CLAUDE_PROJECT_DIR:-$(evy_field cwd)}"
 folder="${folder:-$PWD}"
-# The agent stopped and waits for the person (TK2), on any machine
-evy_presence "$session" ended "$folder"
+# The agent stopped and waits for the person (TK2), on any machine, also in a folder of no space once the session
+# claimed a task there (TK5)
+{ [ -f "$dir/linked" ] || [ -f "$dir/claimed" ]; } && evy_presence "$session" ended "$folder"
+[ -f "$dir/linked" ] || exit 0
 transcript="$(evy_field transcript_path)"
 [ -r "$transcript" ] || exit 0
 command -v osascript >/dev/null 2>&1 || exit 0
