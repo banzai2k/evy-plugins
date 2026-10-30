@@ -4,7 +4,9 @@
 # without one, and the end of the session's turn never reached the task: it showed Working long after the session
 # stopped to wait on the person. Also marks the session as holding a task, so the prompt and Stop hooks tell EVY when
 # its turns start and end even in a folder no space is linked to. Runs in the background and never holds up the turn,
-# and never in runs (the runner names their session itself). EVY_SHIP_WAIT=1 sends in the foreground (the tests).
+# and never in runs (the runner names their session itself). A claim EVY took also goes on the session's list of
+# claimed tasks, which its turn signals and step lines name (QC7), so they reach the task whatever session id the
+# claim stored. EVY_SHIP_WAIT=1 sends in the foreground (the tests).
 . "$(dirname "$0")/evy-lib.sh"
 
 [ "${COMPASS_RUNNER:-}" = "1" ] && exit 0
@@ -18,7 +20,12 @@ id="$(printf '%s' "$input" | sed -n 's/.*"tool_input"[[:space:]]*:[[:space:]]*{\
   grep -oE "\"id\"[[:space:]]*:[[:space:]]*\"$uuid\"" | grep -oE "$uuid" | head -n 1)"
 [ -n "$id" ] || id="$(printf '%s' "$input" | sed -n 's/.*"tool_response"//p' | grep -oE "$uuid" | head -n 1)"
 [ -n "$id" ] || exit 0
-mkdir -p "$dir" 2>/dev/null && : > "$dir/claimed"
+mkdir -p "$dir" 2>/dev/null && touch "$dir/claimed"
+# Only a claim EVY took (its answer names the task running), never one it refused.
+if printf '%s' "$input" | sed -n 's/.*"tool_response"//p' | grep -qE 'status\\*"[[:space:]]*:[[:space:]]*\\*"running' &&
+  ! grep -qx "$id" "$dir/claimed" 2>/dev/null; then
+  printf '%s\n' "$id" >> "$dir/claimed"
+fi
 base="$(evy_base)" || exit 0
 token="$(evy_token "$EVY_KIND")" || exit 0
 [ -n "$token" ] || exit 0

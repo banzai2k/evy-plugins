@@ -96,6 +96,14 @@ evy_session_id() {
   printf '%s' "${EVY_SESSION_ID:-${CLAUDE_CODE_SESSION_ID:-}}" | tr -cd 'A-Za-z0-9_.:-' | head -c 200
 }
 
+# The tasks session $1 claimed, as the hook after claim_task wrote them (QC7), comma separated.
+evy_claimed_tasks() {
+  local dir
+  dir="$(evy_session_dir "$1")" || return 0
+  [ -s "$dir/claimed" ] || return 0
+  grep -E '^[0-9a-f-]{36}$' "$dir/claimed" | tail -n 20 | paste -sd, -
+}
+
 # Tells EVY a turn of session $1 started or ended ($2), for the tasks it claimed, in the background: never holds up
 # the turn. $3 is the folder.
 evy_presence() {
@@ -107,7 +115,7 @@ evy_presence() {
   # The token goes to curl on stdin, never on its command line where other processes could read it.
   set -- curl -sS -K - --max-time 4 -o /dev/null --data-urlencode "session=$session" --data-urlencode "state=$state" \
     --data-urlencode "kind=chat" --data-urlencode "folder=$folder" --data-urlencode "plugin=$(evy_plugin_version)" \
-    "$base/runner/api/presence"
+    --data-urlencode "tasks=$(evy_claimed_tasks "$session")" "$base/runner/api/presence"
   if [ "${EVY_SHIP_WAIT:-}" = "1" ]; then
     printf 'header = "Authorization: Bearer %s"\n' "$token" | "$@" 2>/dev/null
   else

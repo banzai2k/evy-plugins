@@ -1,0 +1,75 @@
+#!/bin/bash
+# After each tool call of a session that claimed an EVY task (QC7): tells EVY the step it is on ("Running: bin/test")
+# and its checklist when the call changed it, the lines EVY's runner posts for a run it started, so an opened task
+# shows what the session does instead of "Getting started" until the report. evy-step.js words the line; only the
+# line goes out. A checklist goes at once; step lines at most every STEP_EVERY seconds, the newest one last, so the
+# task never shows an older step than the session's. Runs in the background and never holds up the session, except
+# for the moment a checklist tool's line takes to word, and never in runs (the runner posts their steps). Needs
+# macOS's osascript; elsewhere it sends nothing. EVY_SHIP_WAIT=1 sends in the foreground (the tests).
+. "$(dirname "$0")/evy-lib.sh"
+
+[ "${COMPASS_RUNNER:-}" = "1" ] && exit 0
+EVY_INPUT="$(cat)"
+session="$(evy_field session_id)"
+dir="$(evy_session_dir "$session")" || exit 0
+[ -f "$dir/claimed" ] || exit 0
+command -v osascript >/dev/null 2>&1 || exit 0
+STEP_EVERY="${EVY_STEP_EVERY:-15}"
+reader="$(dirname "$0")/evy-step.js"
+tasks="$(evy_claimed_tasks "$session")"
+
+# Sends one body, the token on curl's stdin, never on its command line where other processes could read it.
+send() {
+  local base token
+  base="$(evy_base)" || return 0
+  token="$(evy_token "$EVY_KIND")" || return 0
+  [ -n "$token" ] || return 0
+  printf 'header = "Authorization: Bearer %s"\n' "$token" | curl -sS -K - --max-time 6 -o /dev/null \
+    -H 'Content-Type: application/json' --data-binary @"$1" \
+    "$base/runner/api/steps?kind=chat&plugin=$(evy_plugin_version)" 2>/dev/null
+}
+
+# The newest step line, once STEP_EVERY seconds have passed since the last one went. One waiting sender per session;
+# a line that comes while it waits replaces the one it will send.
+send_step() {
+  local last now wait
+  # A sender that died while waiting (the Mac slept) lets the next one through after a minute.
+  find "$dir/step-wait" -maxdepth 0 -mmin +1 -exec rmdir {} \; 2>/dev/null
+  mkdir "$dir/step-wait" 2>/dev/null || return 0
+  last="$(cat "$dir/step-at" 2>/dev/null)"
+  now="$(date +%s)"
+  wait=$(( ${last:-0} + STEP_EVERY - now ))
+  [ "$wait" -gt 0 ] 2>/dev/null && sleep "$wait"
+  mv "$dir/step-body" "$dir/step-wait/body" 2>/dev/null && { send "$dir/step-wait/body"; date +%s > "$dir/step-at"; }
+  rm -rf "$dir/step-wait"
+}
+
+tool="$(evy_field tool_name)"
+case "$tool" in
+  TodoWrite | TaskCreate | TaskUpdate | *__update_plan)
+    # In the foreground, so two checklist calls in a row change the list in their order.
+    body="$(printf '%s' "$EVY_INPUT" | osascript -l JavaScript "$reader" "$dir/checklist.json" "$session" "$tasks" 2>/dev/null)"
+    [ -n "$body" ] || exit 0
+    printf '%s' "$body" > "$dir/plan-body.$$"
+    if [ "${EVY_SHIP_WAIT:-}" = "1" ]; then
+      send "$dir/plan-body.$$"; rm -f "$dir/plan-body.$$"
+    else
+      (send "$dir/plan-body.$$"; rm -f "$dir/plan-body.$$") </dev/null >/dev/null 2>&1 &
+    fi
+    ;;
+  *)
+    step() {
+      local body
+      body="$(printf '%s' "$EVY_INPUT" | osascript -l JavaScript "$reader" "$dir/checklist.json" "$session" "$tasks" 2>/dev/null)"
+      [ -n "$body" ] || return 0
+      printf '%s' "$body" > "$dir/step-body.$$" && mv "$dir/step-body.$$" "$dir/step-body"
+      send_step
+    }
+    if [ "${EVY_SHIP_WAIT:-}" = "1" ]; then
+      step
+    else
+      (step) </dev/null >/dev/null 2>&1 &
+    fi
+    ;;
+esac
+exit 0
