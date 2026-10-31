@@ -1,0 +1,48 @@
+#!/bin/bash
+# After Claude Code's Artifact tool: tells EVY about the claude.ai page it just published, so every Claude artifact
+# made in a space's folder reaches that space's Assets as made by the session (AF1), tied to the task the session
+# claimed when there is one. Before, EVY only knew an artifact a report listed or a note linked. Only a publish of a
+# page: an asset upload, a read, a list or a delete sends nothing. The title is the page's own <title>, else the one
+# the tool was given. Runs in the background and never holds up the turn. Reads JSON with macOS's plutil; elsewhere
+# it does nothing. EVY_SHIP_WAIT=1 sends in the foreground (the tests).
+. "$(dirname "$0")/evy-lib.sh"
+
+EVY_INPUT="$(cat)"
+command -v plutil >/dev/null 2>&1 || exit 0
+# plutil prints a missing key's error on stdout, so a failed read must give nothing.
+json() { local value; value="$(printf '%s' "$2" | plutil -extract "$1" raw -o - - 2>/dev/null)" || return 1; printf '%s' "$value"; }
+action="$(json tool_input.action "$EVY_INPUT")"
+[ -z "$action" ] || [ "$action" = publish ] || exit 0
+[ "$(json tool_input.asset "$EVY_INPUT")" = true ] && exit 0
+# The page's address, from the tool's answer.
+url="$(printf '%s' "$EVY_INPUT" | tr -d '\n' | sed -n 's/.*"tool_response"//p' |
+  grep -oE 'https://claude\.ai/(code/)?artifact/[A-Za-z0-9_-]+' | head -n 1)"
+[ -n "$url" ] || exit 0
+
+file="$(json tool_input.file_path "$EVY_INPUT")"
+case "$file" in "~/"*) file="$HOME/${file#\~/}" ;; esac
+title=""
+if [ -n "$file" ] && [ -f "$file" ] && [ -r "$file" ]; then
+  title="$(head -c 65536 "$file" | tr '\n' ' ' | sed -n 's/.*<title[^>]*>\([^<]*\)<\/title>.*/\1/p' | head -n 1)"
+fi
+[ -n "$title" ] || title="$(json tool_input.title "$EVY_INPUT")"
+
+session="$(evy_field session_id)"
+folder="$(evy_field cwd)"
+tasks="$(evy_claimed_tasks "$session" | sed -e 's/[^,][^,]*/"&"/g')"
+base="$(evy_base)" || exit 0
+token="$(evy_token "$EVY_KIND")" || exit 0
+[ -n "$token" ] || exit 0
+kind=chat
+[ "${COMPASS_RUNNER:-}" = "1" ] && kind=run
+payload="{\"url\":$(evy_json "$url"),\"title\":$(evy_json "$title"),\"session\":$(evy_json "$session"),\"tasks\":[$tasks],\"folder\":$(evy_json "$folder"),\"repo_folder\":$(evy_json "$(evy_repo_folder "$folder")"),\"kind\":$(evy_json "$kind")}"
+
+# The token goes to curl on stdin, never on its command line where other processes could read it.
+set -- curl -sS -K - --max-time 10 -o /dev/null -H "Content-Type: application/json" --data-binary "$payload" \
+  "$base/runner/api/artifacts?plugin=$(evy_plugin_version)"
+if [ "${EVY_SHIP_WAIT:-}" = "1" ]; then
+  printf 'header = "Authorization: Bearer %s"\n' "$token" | "$@" 2>/dev/null
+else
+  (printf 'header = "Authorization: Bearer %s"\n' "$token" | "$@") </dev/null >/dev/null 2>&1 &
+fi
+exit 0

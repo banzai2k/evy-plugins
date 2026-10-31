@@ -46,6 +46,12 @@
         "hooks": [
           { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/evy-pictures\"", "timeout": 10 }
         ]
+      },
+      {
+        "matcher": "^Artifact$",
+        "hooks": [
+          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/evy-artifact\"", "timeout": 10 }
+        ]
       }
     ]
   }

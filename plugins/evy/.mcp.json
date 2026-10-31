@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "evy": {
+    "planner": {
       "type": "http",
       "url": "${user_config.evy_api}/mcp",
       "headersHelper": "\"${CLAUDE_PLUGIN_ROOT}/bin/evy-headers\" \"${CLAUDE_PROJECT_DIR}\""
