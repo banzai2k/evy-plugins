@@ -1,9 +1,11 @@
 // What EVY's step hook sends after one tool call of a session that claimed an EVY task (QC7): the step it is on, as
 // the runner words it for a run it started ("Reading BRIEF.md", "Running: bin/test"), or its checklist when the call
-// changed it (Claude Code's TaskCreate and TaskUpdate, TodoWrite on older versions, the desktop app's plan tool).
-// Only the line goes out: never what a tool read, wrote or answered. The checklist is kept between calls in STATE.
-// Runs with the JavaScript every Mac has: osascript -l JavaScript evy-step.js STATE SESSION TASKS (ids, comma
-// separated), with the hook's JSON on stdin. Prints the request body, or nothing when there is nothing to send.
+// changed it (Claude Code's TaskCreate and TaskUpdate, TodoWrite on older versions, the desktop app's plan tool,
+// Codex's update_plan). With a step goes the newest thing the agent said, from the file SAID (TO3; evy-transcript.js
+// picks it from the transcript), which EVY keeps once as a say line. Only the line and the agent's own words go out:
+// never what a tool read, wrote or answered. The checklist is kept between calls in STATE. Runs with the JavaScript
+// every Mac has: osascript -l JavaScript evy-step.js STATE SESSION TASKS (ids, comma separated) [SAID], with the
+// hook's JSON on stdin. Prints the request body, or nothing when there is nothing to send.
 ObjC.import("Foundation");
 
 const LINE_CHARS = 90;
@@ -24,19 +26,43 @@ function host(url) {
   return m ? m[1] : "a web page";
 }
 
-// One plain line for a tool call, the runner's step_line in the Python runner and the Swift helper.
+// The command a Codex shell call ran, without the `bash -lc '…'` wrapper.
+function command(value) {
+  const parts = Array.isArray(value) ? value.map(String) : null;
+  if (parts && parts.length === 3 && ["-c", "-lc"].includes(parts[1]) && ["sh", "bash", "zsh"].includes(base(parts[0]))) return parts[2];
+  return parts ? parts.join(" ") : String(value || "");
+}
+
+// The files a Codex patch touches, by name.
+function patched(i) {
+  const text = String(i.patch || i.input || (Array.isArray(i.command) ? i.command.join("\n") : i.command) || "");
+  const files = [];
+  const re = /^\*\*\* (Add|Update|Delete) File: (.+)$/gm;
+  let m;
+  while ((m = re.exec(text))) files.push(`${m[1] === "Add" ? "Writing" : m[1] === "Delete" ? "Deleting" : "Editing"} ${base(m[2].trim())}`);
+  return files.length ? files.slice(0, 3).join(", ") : "Editing files";
+}
+
+// One plain line for a tool call, the runner's step_line in the Python runner and the Swift helper, and Codex's own
+// tool names.
 function stepLine(name, i) {
   if (name === "Read") return `Reading ${base(i.file_path)}`;
   if (name === "Edit" || name === "MultiEdit") return `Editing ${base(i.file_path)}`;
   if (name === "Write") return `Writing ${base(i.file_path)}`;
   if (name === "NotebookEdit") return `Editing ${base(i.notebook_path)}`;
-  if (name === "Bash") return "Running: " + short(i.description || i.command, LINE_CHARS);
+  if (name === "Bash") return "Running: " + short(i.description || command(i.command), LINE_CHARS);
   if (name === "Grep") return `Searching the code for "${short(i.pattern, 50)}"`;
   if (name === "Glob") return `Listing files ${short(i.pattern, 60)}`;
   if (name === "WebSearch") return "Searching the web: " + short(i.query, LINE_CHARS);
   if (name === "WebFetch") return "Reading " + host(i.url);
   if (name === "Task" || name === "Agent") return "Starting a helper: " + short(i.description || i.prompt, LINE_CHARS);
   if (name === "Skill") return `Using the ${i.skill || i.name || ""} skill`.replace("  ", " ");
+  if (["shell", "local_shell", "exec_command", "container.exec"].includes(name)) {
+    return "Running: " + short(command(i.command || i.cmd), LINE_CHARS);
+  }
+  if (name === "apply_patch") return patched(i);
+  if (name === "web_search") return "Searching the web: " + short(i.query, LINE_CHARS);
+  if (name === "update_plan") return null;
   if (["TodoWrite", "ToolSearch", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "TaskOutput"].includes(name)) return null;
   if (name.startsWith("mcp__ccd_")) return null;
   if (name.startsWith("mcp__")) {
@@ -68,6 +94,9 @@ function nextPlan(name, i, response, plan) {
     return plan.map((t) =>
       t.id === id ? { id, text: i.subject ? String(i.subject) : t.text, status: STATUSES.includes(i.status) ? i.status : t.status } : t,
     );
+  }
+  if (name === "update_plan" && Array.isArray(i.plan)) {
+    return i.plan.filter((t) => t && t.step).map((t, n) => ({ id: String(n + 1), text: String(t.step), status: status(t.status) }));
   }
   if (/__update_plan$/.test(name)) {
     if (Array.isArray(i.items)) {
@@ -119,6 +148,9 @@ function run(argv) {
     $(JSON.stringify(next)).writeToFileAtomicallyEncodingError(argv[0], true, $.NSUTF8StringEncoding, null);
     return next.length ? JSON.stringify(Object.assign(body, { plan: next })) : "";
   }
-  const line = stepLine(name, i);
-  return line ? JSON.stringify(Object.assign(body, { line })) : "";
+  const line = name ? stepLine(name, i) : null;
+  const said = argv[3] ? readFile(argv[3]).trim() : "";
+  if (line) body.line = line;
+  if (said) body.said = said;
+  return line || said ? JSON.stringify(body) : "";
 }

@@ -1,0 +1,32 @@
+#!/bin/bash
+# After a tool call (PLG2): a turn the person did not type (a sub-session's or a background task's notice woke the
+# agent) gets no prompt hook, so the first tool call of such a turn adds what is new in EVY for the session, the same
+# news the prompt hook gives. So does a call in a long turn once NEWS_EVERY seconds passed since the session last
+# heard. Prints nothing when nothing is new or EVY is out of reach, in runs, and in a sub-agent's calls (the news
+# would reach the sub-agent, not the session). EVY marks what each session heard, so news from EVY's tools and from
+# this hook never repeats.
+. "$(dirname "$0")/evy-lib.sh"
+
+[ "${COMPASS_RUNNER:-}" = "1" ] && exit 0
+EVY_INPUT="$(cat)"
+[ -n "$(evy_field agent_id)" ] && exit 0
+session="$(evy_field session_id)"
+dir="$(evy_session_dir "$session")" || exit 0
+{ [ -f "$dir/linked" ] || [ -f "$dir/claimed" ]; } || exit 0
+NEWS_EVERY="${EVY_NEWS_EVERY:-600}"
+if [ -f "$dir/turn-open" ]; then
+  last="$(cat "$dir/news-at" 2>/dev/null)"
+  [ $(( $(date +%s) - ${last:-0} )) -ge "$NEWS_EVERY" ] 2>/dev/null || exit 0
+fi
+: > "$dir/turn-open"
+folder="${CLAUDE_PROJECT_DIR:-$(evy_field cwd)}"
+folder="${folder:-$PWD}"
+news="$(evy_news "$session" "$folder")"
+[ -n "$news" ] || exit 0
+# The news as JSON for the agent's context: backslashes, quotes and tabs escaped with sed (awks differ on
+# backslashes), the lines joined with \n, other control characters dropped.
+tab="$(printf '\t')"
+text="$(printf '%s' "$news" | tr -d '\000-\010\013-\037' | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e "s/$tab/\\\\t/g" |
+  awk 'NR > 1 { printf "%s", "\\n" } { printf "%s", $0 }')"
+printf '{"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":"%s"}}\n' "$text"
+exit 0

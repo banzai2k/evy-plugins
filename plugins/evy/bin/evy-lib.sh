@@ -124,6 +124,34 @@ evy_presence() {
   return 0
 }
 
+# What is new in EVY for session $1 in folder $2 since it last heard (the session folder's `since`), on stdout,
+# nothing when nothing is or EVY is out of reach (after 4 seconds at most). Moves `since` on and stamps `news-at`
+# (seconds) for the hook after a tool call (PLG2). The first call of a session only starts the clock.
+evy_news() {
+  local session="$1" folder="$2" dir now since base token body status
+  dir="$(evy_session_dir "$session")" || return 0
+  mkdir -p "$dir"
+  now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  since="$(cat "$dir/since" 2>/dev/null)"
+  date +%s > "$dir/news-at"
+  if [ -z "$since" ]; then
+    printf '%s' "$now" > "$dir/since"
+    return 0
+  fi
+  base="$(evy_base)" || return 0
+  token="$(evy_token "$EVY_KIND")" || return 0
+  [ -n "$token" ] || return 0
+  # The token goes to curl on stdin, never on its command line where other processes could read it.
+  body="$(printf 'header = "Authorization: Bearer %s"\n' "$token" | curl -sS -K - --max-time 4 -G -w '\n%{http_code}' \
+    --data-urlencode "folder=$folder" --data-urlencode "repo_folder=$(evy_repo_folder "$folder")" \
+    --data-urlencode "session=$session" --data-urlencode "since=$since" --data-urlencode "kind=chat" \
+    "$base/runner/api/news" 2>/dev/null)" || return 0
+  status="${body##*$'\n'}"
+  case "$status" in 200|204) printf '%s' "$now" > "$dir/since" ;; *) return 0 ;; esac
+  [ "$status" = "200" ] && printf '%s\n' "${body%$'\n'*}"
+  return 0
+}
+
 EVY_PLUGIN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # The agent kind these scripts serve: Codex's wrappers in codex/ set EVY_AGENT_KIND=codex.

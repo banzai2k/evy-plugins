@@ -2,10 +2,12 @@
 // lines on stdin (the part since the last send), never tool calls, tool output or file contents, with the folder and
 // session it came from. Runs with the JavaScript every Mac has: osascript -l JavaScript evy-transcript.js FOLDER
 // REPO_FOLDER SESSION KIND. Prints the request body, or nothing when there is nothing to send. Reads Claude Code's
-// transcripts and Codex's rollout files.
+// transcripts and Codex's rollout files. With --said in place of the folder, prints only the newest thing the agent
+// said, as plain text up to SAID_CHARS characters, for the step hook's say line (TO3).
 ObjC.import("Foundation");
 
 const MESSAGE_CHARS = 2000;
+const SAID_CHARS = 600;
 const TOTAL_CHARS = 20000;
 const NOISE = /<(system-reminder|command-[\w-]+|local-command-[\w-]+|task-notification|environment_context|user_instructions)>[\s\S]*?<\/\1>/g;
 
@@ -42,6 +44,7 @@ function run(argv) {
   const data = $.NSFileHandle.fileHandleWithStandardInput.readDataToEndOfFile;
   const input = $.NSString.alloc.initWithDataEncoding(data, $.NSUTF8StringEncoding).js || "";
   const lines = [];
+  let newest = "";
   input.split("\n").forEach((raw) => {
     let parsed = null;
     try {
@@ -51,7 +54,11 @@ function run(argv) {
     }
     const found = entry(parsed);
     if (found) lines.push(`[${found[0] || ""}] ${found[1]}: ${found[2]}`);
+    if (found && found[1] === "Agent") newest = found[2];
   });
+  if (argv[0] === "--said") {
+    return newest.length > SAID_CHARS ? newest.slice(0, SAID_CHARS - 1).trimEnd() + "…" : newest;
+  }
   if (!lines.some((line) => / Person: /.test(line))) return "";
   const text = lines.join("\n").slice(-TOTAL_CHARS);
   return JSON.stringify({ text, folder: argv[0] || "", repo_folder: argv[1] || "", session: argv[2] || "", kind: argv[3] || "chat" });

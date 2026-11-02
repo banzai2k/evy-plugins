@@ -1,7 +1,7 @@
 #!/bin/bash
-# Gives Codex EVY's tools and its start-of-session, prompt and end-of-turn hooks, in ~/.codex/config.toml between EVY's
-# markers, replacing what an earlier run wrote there and touching nothing else. Codex runs a hook only after the
-# person trusts it once in /hooks, and again after every change to it. Untested until CX1 (Codex on a new Mac).
+# Gives Codex EVY's tools and its start-of-session, prompt, after-each-tool (steps and news) and end-of-turn hooks, in
+# ~/.codex/config.toml between EVY's markers, replacing what an earlier run wrote there and touching nothing else.
+# Codex runs a hook only after the person trusts it once in /hooks, and again after every change to it. Untested until CX1 (Codex on a new Mac).
 # Usage: codex/setup.sh   (from the installed plugin; reads EVY's address from EVY Desktop's env file)
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -48,6 +48,18 @@ timeout = 10
 type = \"command\"
 command = \"$ROOT/bin/evy-guard-folders\"
 timeout = 5
+
+[[hooks.PostToolUse]]
+[[hooks.PostToolUse.hooks]]
+type = \"command\"
+command = \"$ROOT/codex/evy-step\"
+timeout = 10
+
+[[hooks.PostToolUse]]
+[[hooks.PostToolUse.hooks]]
+type = \"command\"
+command = \"$ROOT/codex/evy-turn-news\"
+timeout = 8
 $end"
 
 kept="$(awk -v s="$start" -v e="$end" '$0==s{skip=1} !skip{print} $0==e{skip=0}' "$config")"

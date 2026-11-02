@@ -14,9 +14,13 @@ session="$(evy_field session_id)"
 dir="$(evy_session_dir "$session")" || exit 0
 folder="${CLAUDE_PROJECT_DIR:-$(evy_field cwd)}"
 folder="${folder:-$PWD}"
+# The next turn may start without a message from the person: its first tool call asks for the news (PLG2)
+rm -f "$dir/turn-open"
 # The agent stopped and waits for the person (TK2), on any machine, also in a folder of no space once the session
 # claimed a task there (TK5)
 { [ -f "$dir/linked" ] || [ -f "$dir/claimed" ]; } && evy_presence "$session" ended "$folder"
+# What the agent said last in the turn reaches the task it holds as a say line, after its last tool call (TO3)
+[ -f "$dir/claimed" ] && printf '%s' "$EVY_INPUT" | "$(dirname "$0")/evy-step"
 [ -f "$dir/linked" ] || exit 0
 transcript="$(evy_field transcript_path)"
 [ -r "$transcript" ] || exit 0

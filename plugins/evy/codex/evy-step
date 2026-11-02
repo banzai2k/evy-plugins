@@ -1,0 +1,10 @@
+#!/bin/bash
+# After each tool call of a Codex session (TO3): a claim of an EVY task goes to evy-claimed, as Claude Code's hook
+# after claim_task does, and every call to evy-step, which sends the step it is on, its checklist and what it said.
+# Codex runs this without a shell, so the agent kind is set here rather than in its config.
+export EVY_AGENT_KIND=codex
+here="$(dirname "$0")/../bin"
+input="$(cat)"
+tool="$(printf '%s' "$input" | tr -d '\n' | sed -n 's/.*"tool_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
+case "$tool" in *evy*claim_task) printf '%s' "$input" | "$here/evy-claimed" ;; esac
+printf '%s' "$input" | exec "$here/evy-step"

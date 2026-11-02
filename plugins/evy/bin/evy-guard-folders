@@ -1,47 +1,112 @@
 #!/usr/bin/env python3
-# Refuses an edit inside EVY's numbered folders (SYNC1). The files there are
-# EVY's copy. Write the note with save_note, or finish the task with report.
-# Claude Code and Codex both run this before a tool call. A path with no
-# numbered folder is left alone, including a note whose text mentions one.
+# Refuses an edit in EVY's read-only copy of a space's notes (SYNC1): `00 Start here.md`, the numbered folders
+# from `02 Private notes` to `08 Team context`, and the `Knowledge` and `Private notes` folders of an older EVY
+# Desktop. Write the note with save_note, or finish the task with report. `01 Assets` is where runs save their
+# files (LF1), so it stays open. Only a space folder EVY made counts: one holding `00 Start here.md` or EVY's
+# snapshot list, or a Knowledge copy with its `.git` file. A file elsewhere named like a numbered folder, say a
+# slide "01 The problem.html", is left alone, and so are EVY's own tools, which write nothing on this Mac.
+# Claude Code and Codex both run this before a tool call.
 import json
+import os
 import re
 import sys
 
 REASON = (
     "EVY's numbered folders are a read-only copy. Write the note with save_note, "
-    "or finish the task with report. Do not edit 00 Start here.md, 01 Assets, "
-    "02 Private notes, 03 Plans and the other numbered folders, or Knowledge or Private notes."
+    "or finish the task with report. Do not edit 00 Start here.md, 02 Private notes, 03 Plans "
+    "and the other numbered folders, or Knowledge or Private notes. Files you make go in 01 Assets."
 )
+ASSETS = "01 Assets"
+START = "00 Start here.md"
+SNAPSHOT = ".evy-snapshot.json"
 NUMBERED = re.compile(r"^\d{2} ")
-NAMES = {"Knowledge", "Private notes", "00 Start here.md"}
+COPIES = {"Knowledge", "Private notes"}
 PATH_KEYS = {"file_path", "filepath", "path", "file", "filename", "target_file", "notebook_path", "target"}
 COMMAND_KEYS = {"command", "cmd", "script", "patch"}
 READ_TOOLS = {"read", "grep", "glob", "ls", "webfetch", "websearch", "notebookread", "view", "list_dir", "read_file"}
+EVY_TOOL = re.compile(r"^mcp__.*evy.*__")
 WRITES = re.compile(
     r"(?:^|[\s;&|(])(?:tee|rm|rmdir|mv|cp|mkdir|touch|ln|chmod|chown|truncate|dd|install|rsync|git\s+(?:checkout|restore|clean|reset))\b"
     r"|\bsed\s+(?:-\w*i|--in-place)|\bperl\s+-\w*i|>>?\s*[^\s&|]"
     r"|\b(?:write_text|write_bytes|open\([^)]*[\"'][wax]|writeFile|WriteFile|Set-Content|Out-File)"
     r"|\*\*\* (?:Update|Add|Delete) File"
 )
+# Where a path may start in a command: after a space, a quote or a shell operator.
+DELIMITERS = " \t\n\"'`=(;&|<>:"
+# A segment that may be EVY's, at the start of a path or after a slash.
+SEGMENT = re.compile(r"(?:^|(?<=[/\s\"'`=(;&|<>:]))(\d{2} |Knowledge(?=[/\"'`]|$)|Private notes(?=[/\"'`]|$))")
+# How far back a command's path may start before such a segment.
+REACH = 400
 
 
-def segments(text):
-    return [part.strip(" '\"`") for part in text.replace("\\", "/").split("/")]
+def space_folder(folder):
+    return os.path.isfile(os.path.join(folder, START)) or os.path.exists(os.path.join(folder, SNAPSHOT))
 
 
-PATH_HIT = re.compile(r"(?:^|[/\\])(\d{2} [^/\\\n]+|00 Start here\.md|Knowledge|Private notes)(?:[/\\]|$)")
+def copy_folder(folder, name):
+    inside = os.path.join(folder, name)
+    return space_folder(folder) or os.path.exists(os.path.join(inside, ".git")) or os.path.exists(os.path.join(inside, SNAPSHOT))
 
 
-def numbered(text):
-    norm = text.replace("\\", "/")
-    if PATH_HIT.search("/" + norm) or PATH_HIT.search(norm):
-        return True
-    parts = segments(norm)
-    return any(NUMBERED.match(part) or part in NAMES for part in parts) and ("/" in norm or norm.startswith("~") or any(NUMBERED.match(part) for part in parts))
+def guarded(folder, name):
+    """Whether `name`, directly inside `folder`, is part of EVY's read-only copy."""
+    if not folder:
+        return False
+    if name in COPIES:
+        return copy_folder(folder, name)
+    return bool(NUMBERED.match(name)) and name != ASSETS and space_folder(folder)
 
 
-def command_hits(text):
-    return bool(PATH_HIT.search(text.replace("\\", "/"))) and bool(WRITES.search(text))
+def absolute(path, cwd):
+    path = os.path.expanduser(os.path.expandvars(path.strip().strip("'\"`")))
+    if not os.path.isabs(path):
+        if not cwd:
+            return None
+        path = os.path.join(cwd, path)
+    return os.path.normpath(path)
+
+
+def path_hits(text, cwd):
+    path = absolute(text, cwd)
+    if not path:
+        return False
+    parts = path.split("/")
+    return any(guarded("/".join(parts[:i]) or "/", part) for i, part in enumerate(parts) if i)
+
+
+def name_at(text, start):
+    """The segment's full name: up to the next slash, quote or line end (a numbered name holds spaces)."""
+    match = re.match(r"[^/\"'`\n]*", text[start:])
+    name = match.group(0)
+    if NUMBERED.match(name):
+        return ASSETS if name == ASSETS or name.startswith(ASSETS + " ") else name
+    return name.split()[0] if name.split() else name
+
+
+def command_hits(text, cwd):
+    text = text.replace("\\ ", " ")
+    if not WRITES.search(text):
+        return False
+    for match in SEGMENT.finditer(text):
+        start = match.start(1)
+        name = name_at(text, start)
+        if start == 0 or text[start - 1] != "/":
+            # A path from the working folder: only a path into the folder, or the Start here file itself, so a
+            # text that just names a numbered folder is left alone.
+            into = text[start + len(name):start + len(name) + 1] == "/" or name.startswith(START)
+            if into and guarded(cwd, START if name.startswith(START) else name):
+                return True
+            continue
+        # The folder the segment sits in: try every place a path could start before it, on the same line.
+        for begin in range(start - 1, max(start - REACH, 0) - 1, -1):
+            if text[begin] == "\n":
+                break
+            if begin and text[begin - 1] not in DELIMITERS:
+                continue
+            folder = absolute(text[begin:start - 1] or "/", cwd)
+            if guarded(folder, START if name.startswith(START) else name):
+                return True
+    return False
 
 
 def walk(node, key=None):
@@ -56,15 +121,18 @@ def walk(node, key=None):
 
 
 def refused(payload):
-    tool = payload.get("tool_name") if isinstance(payload, dict) else None
-    if isinstance(tool, str) and tool.lower() in READ_TOOLS:
+    if not isinstance(payload, dict):
         return False
-    for key, text in walk(payload):
+    tool = payload.get("tool_name")
+    if isinstance(tool, str) and (tool.lower() in READ_TOOLS or EVY_TOOL.match(tool)):
+        return False
+    cwd = payload.get("cwd") if isinstance(payload.get("cwd"), str) else os.getcwd()
+    for key, text in walk(payload.get("tool_input", payload)):
         name = key.lower()
         if name in PATH_KEYS or name.endswith("path") or name.endswith("_file"):
-            if numbered(text):
+            if path_hits(text, cwd):
                 return True
-        elif name in COMMAND_KEYS and command_hits(text):
+        elif name in COMMAND_KEYS and command_hits(text, cwd):
             return True
     return False
 

@@ -42,6 +42,11 @@
         ]
       },
       {
+        "hooks": [
+          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/evy-turn-news\"", "timeout": 8 }
+        ]
+      },
+      {
         "matcher": "mcp__.*evy.*__report",
         "hooks": [
           { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/evy-pictures\"", "timeout": 10 }
