@@ -13,7 +13,7 @@
       "type": "string",
       "title": "EVY address",
       "description": "Where your EVY runs, without a path. EVY Desktop sets it during setup.",
-      "default": "https://my.evy.so"
+      "default": "https://ubuntu-8gb-nbg1-1.tail8a612f.ts.net:8443"
     }
   }
 }

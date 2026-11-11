@@ -12,8 +12,8 @@ import re
 import sys
 
 REASON = (
-    "EVY's numbered folders are a read-only copy. Write the note with save_note, "
-    "or finish the task with report. Do not edit 00 Start here.md, 02 Private notes, 03 Plans "
+    "EVY's numbered folders are a read-only copy. Save the note in EVY with save_note (it answers with the "
+    "note's link for your reply), or finish the task with report. Do not edit 00 Start here.md, 02 Private notes, 03 Plans "
     "and the other numbered folders, or Knowledge or Private notes. Files you make go in 01 Assets."
 )
 ASSETS = "01 Assets"
