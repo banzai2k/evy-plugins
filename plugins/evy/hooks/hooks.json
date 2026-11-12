@@ -53,6 +53,12 @@
         ]
       },
       {
+        "matcher": "^(Write|Edit|MultiEdit)$",
+        "hooks": [
+          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/evy-documents\"", "timeout": 10 }
+        ]
+      },
+      {
         "matcher": "^Artifact$",
         "hooks": [
           { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/evy-artifact\"", "timeout": 10 }

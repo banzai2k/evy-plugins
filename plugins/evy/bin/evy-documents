@@ -1,0 +1,122 @@
+#!/bin/bash
+# After a tool that writes files (Claude Code's Write, Edit and MultiEdit, Codex's apply_patch): sends each document it
+# wrote (Markdown, CSV, TSV, HTML, PDF, Word, Excel, PowerPoint) to EVY, which puts it in the space's Review (DS3):
+# Markdown as a note, the rest as a file EVY shows there. Whatever the agent's own instructions said about where notes
+# go, so a rule in the person's CLAUDE.md to keep notes in a notes/ folder no longer keeps them out of EVY. The file
+# stays where the agent saved it. A new file comes in; an edit updates what EVY already took in and nothing else. Code
+# stays out: a file in a git repository that holds code, in a hidden folder, and an agent's working files (EVY checks
+# those again). The agent hears the link to put in its reply. Only in a session EVY knows (a linked folder, a claimed
+# task, a run); prints nothing when EVY leaves the file alone or is out of reach. Reads JSON with macOS's plutil;
+# elsewhere it does nothing.
+. "$(dirname "$0")/evy-lib.sh"
+
+EVY_INPUT="$(cat)"
+command -v plutil >/dev/null 2>&1 || exit 0
+[ -n "$(evy_field agent_id)" ] && exit 0
+# plutil prints a missing key's error on stdout, so a failed read must give nothing.
+json() { local value; value="$(printf '%s' "$2" | plutil -extract "$1" raw -o - - 2>/dev/null)" || return 1; printf '%s' "$value"; }
+
+is_document() {
+  printf '%s' "$1" | grep -Eiq '\.(md|markdown|mdx|csv|tsv|html?|pdf|docx|xlsx|pptx)$' || return 1
+  case "$1" in */.*) return 1 ;; esac
+  case "$1" in
+    "$HOME"/Library/*) return 1 ;;
+    "$HOME"/* | /Volumes/*) ;;
+    *) return 1 ;;
+  esac
+  case "${1##*/}" in CLAUDE*.md | AGENTS*.md | *.local.md | STATUS*.md | SESSION[-_\ ]BRIEFS* | README* | CHANGELOG*) return 1 ;; esac
+  case "/${1%/*}/" in */tasks/* | */memory/* | */memory-bank/* | */docs/superpowers/*) return 1 ;; esac
+  return 0
+}
+
+# Whether $1 sits in a git repository that holds code: a manifest or build file at its top.
+in_code() {
+  local dir marker
+  dir="$(dirname "$1")"
+  while [ -n "$dir" ] && [ "$dir" != "/" ]; do
+    if [ -e "$dir/.git" ]; then
+      for marker in package.json Gemfile go.mod Cargo.toml pyproject.toml setup.py requirements.txt Package.swift \
+        pom.xml build.gradle composer.json mix.exs Makefile Dockerfile docker-compose.yml tsconfig.json deno.json src services; do
+        [ -e "$dir/$marker" ] && return 0
+      done
+      ls -d "$dir"/*.xcodeproj >/dev/null 2>&1 && return 0
+      return 1
+    fi
+    dir="$(dirname "$dir")"
+  done
+  return 1
+}
+
+folder="${CLAUDE_PROJECT_DIR:-$(evy_field cwd)}"
+folder="${folder:-$PWD}"
+tool="$(evy_field tool_name)"
+# Each file as "1<tab>path" when the tool made it, "0<tab>path" when it changed it.
+files=""
+case "$tool" in
+  Write | Edit | MultiEdit)
+    path="$(json tool_input.file_path "$EVY_INPUT")"
+    made=0
+    [ "$tool" = Write ] && [ "$(json tool_response.type "$EVY_INPUT")" = create ] && made=1
+    [ -n "$path" ] && files="$made	$path"
+    ;;
+  *)
+    # Codex's apply_patch names its files in the patch, which sits in the hook's JSON with its newlines escaped.
+    files="$(printf '%s' "$EVY_INPUT" | grep -oE '\*\*\* (Add|Update) File: [^"\\]+' |
+      sed -e 's/^\*\*\* Add File: /1	/' -e 's/^\*\*\* Update File: /0	/' | head -n 20)"
+    ;;
+esac
+[ -n "$files" ] || exit 0
+
+session="$(evy_field session_id)"
+if [ "${COMPASS_RUNNER:-}" != "1" ]; then
+  dir="$(evy_session_dir "$session")" || exit 0
+  { [ -f "$dir/linked" ] || [ -f "$dir/claimed" ]; } || exit 0
+fi
+base="$(evy_base)" || exit 0
+token="$(evy_token "$EVY_KIND")" || exit 0
+[ -n "$token" ] || exit 0
+tasks="$(evy_claimed_tasks "$session")"
+kind=chat
+[ "${COMPASS_RUNNER:-}" = "1" ] && kind=run
+repo="$(evy_repo_folder "$folder")"
+
+said=""
+tab="$(printf '\t')"
+while IFS="$tab" read -r made path; do
+  [ -n "$path" ] || continue
+  case "$path" in "~/"*) path="$HOME/${path#\~/}" ;; /*) ;; *) path="$folder/$path" ;; esac
+  is_document "$path" && [ -f "$path" ] && [ ! -L "$path" ] || continue
+  in_code "$path" && continue
+  shown="$path"
+  case "$shown" in "$HOME"/*) shown="~/${shown#"$HOME"/}" ;; esac
+  size="$(wc -c < "$path" | tr -d ' ')"
+  max=0
+  case "$(printf '%s' "$path" | tr 'A-Z' 'a-z')" in
+    *.md | *.markdown | *.mdx) max=1048576 ;;
+    *.csv | *.tsv) max=2097152 ;;
+    *.html | *.htm) max=400000 ;;
+  esac
+  set -- --form-string "path=$shown" --form-string "new=$made" --form-string "kind=$kind" \
+    --form-string "session=$session" --form-string "tasks=$tasks" --form-string "folder=$folder" \
+    --form-string "repo_folder=$repo" --form-string "sha256=$(shasum -a 256 "$path" | cut -d ' ' -f 1)"
+  if [ "$max" -gt 0 ]; then
+    [ "$size" -le "$max" ] 2>/dev/null || continue
+    set -- "$@" -F "file=@\"$path\""
+  fi
+  # The token goes to curl on stdin, never on its command line where other processes could read it.
+  answer="$(printf 'header = "Authorization: Bearer %s"\n' "$token" |
+    curl -sS -K - --max-time 8 "$@" "$base/runner/api/documents?plugin=$(evy_plugin_version)" 2>/dev/null)" || continue
+  [ "$made" = 1 ] || continue
+  link="$(json document.link "$answer")" || continue
+  [ -n "$link" ] && said="$said
+$link"
+done <<EOF
+$files
+EOF
+
+[ -n "$said" ] || exit 0
+news="EVY put what you just wrote in the person's Review, where they check and file it. Give them its link in your reply:$said"
+text="$(printf '%s' "$news" | tr -d '\000-\010\013-\037' | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e "s/$tab/\\\\t/g" |
+  awk 'NR > 1 { printf "%s", "\\n" } { printf "%s", $0 }')"
+printf '{"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":"%s"}}\n' "$text"
+exit 0
