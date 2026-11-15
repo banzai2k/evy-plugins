@@ -47,7 +47,7 @@ timeout = 10
 [[hooks.PreToolUse.hooks]]
 type = \"command\"
 command = \"$ROOT/bin/evy-guard-folders\"
-timeout = 5
+timeout = 10
 
 [[hooks.PostToolUse]]
 [[hooks.PostToolUse.hooks]]

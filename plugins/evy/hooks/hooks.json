@@ -25,7 +25,7 @@
     "PreToolUse": [
       {
         "hooks": [
-          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/evy-guard-folders\"", "timeout": 5 }
+          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/evy-guard-folders\"", "timeout": 10 }
         ]
       }
     ],
