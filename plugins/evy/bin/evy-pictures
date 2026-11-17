@@ -53,12 +53,14 @@ send() {
         printf '%s' "$path" | grep -Eiq '\.html?$' || continue
         where=slides max=$MAX_SLIDE_BYTES
         ;;
-      "")
+      "" | document)
+        # A Markdown file or table reported as a document is a note or a table too (RF2).
         if printf '%s' "$path" | grep -Eiq '\.(md|markdown|mdx)$'; then
           where=notes max=$MAX_NOTE_BYTES
         elif printf '%s' "$path" | grep -Eiq '\.(csv|tsv)$'; then
           where=tables max=$MAX_TABLE_BYTES
         else
+          [ "$type" = document ] && continue
           printf '%s' "$path" | grep -Eiq '\.(png|jpe?g|gif|webp|avif)$' || continue
         fi
         ;;
