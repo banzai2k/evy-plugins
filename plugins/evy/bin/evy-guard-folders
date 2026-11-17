@@ -1,11 +1,19 @@
 #!/usr/bin/env python3
 # Refuses an edit in EVY's read-only copy of a space's notes (SYNC1): `00 Start here.md`, the numbered folders
-# from `02 Private notes` to `08 Team context`, and the `Knowledge` and `Private notes` folders of an older EVY
+# from `02 Private notes` to `10 Tables`, and the `Knowledge` and `Private notes` folders of an older EVY
 # Desktop. Write the note with save_note, or finish the task with report. `01 Assets` is where runs save their
 # files (LF1), so it stays open. Only a space folder EVY made counts: one holding `00 Start here.md` or EVY's
 # snapshot list, or a Knowledge copy with its `.git` file. A file elsewhere named like a numbered folder, say a
 # slide "01 The problem.html", is left alone, and so are EVY's own tools, which write nothing on this Mac.
 # Claude Code and Codex both run this before a tool call.
+#
+# A shell command is refused only for what it writes: the file a redirect writes to (never /dev/null), the files
+# rm, mv, mkdir, touch, tee and the like change, the target of cp, ln or rsync, a file sed -i edits, the folder a
+# git checkout or reset rewrites. Reading EVY's folders is fine, in a command that also writes elsewhere too (a
+# `2>/dev/null` on a grep refused one on 14 Nov 2026). Each `cd` moves the folder a relative path starts from. A
+# script that writes through its language's own calls (Python's open, Node's writeFile, a patch) is held to the
+# older rule: refused when it writes at all and names a path into EVY's folders. So is a command the guard cannot
+# read (an unclosed quote) or one that hands paths to xargs.
 import json
 import os
 import re
@@ -31,6 +39,27 @@ WRITES = re.compile(
     r"|\b(?:write_text|write_bytes|open\([^)]*[\"'][wax]|writeFile|WriteFile|Set-Content|Out-File)"
     r"|\*\*\* (?:Update|Add|Delete) File"
 )
+# Writes the shell cannot see: a script's own calls, or a patch.
+SCRIPT_WRITES = re.compile(
+    r"\b(?:write_text|write_bytes|open\([^)]*[\"'][wax]|writeFile|WriteFile|appendFile|Set-Content|Out-File|"
+    r"shutil\.|os\.(?:remove|unlink|rename|replace|makedirs|mkdir|rmdir)|unlinkSync|renameSync|rmSync|mkdirSync)"
+    r"|\*\*\* (?:Update|Add|Delete) File"
+)
+# Places a redirect writes nothing to.
+HARMLESS = {"/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty", "-"}
+# Commands that change every file they name.
+CHANGES = {"rm", "rmdir", "mv", "mkdir", "touch", "chmod", "chown", "chflags", "truncate", "tee", "unlink", "shred",
+           "trash", "xattr", "setfile"}
+# Commands that write only their target, the last path they name.
+TARGETS = {"cp", "ln", "install", "rsync", "ditto", "scp"}
+GIT_WRITES = {"checkout", "restore", "clean", "reset", "switch", "stash", "apply", "am", "pull", "merge", "rebase",
+              "rm", "mv", "cherry-pick", "revert"}
+SHELLS = {"sh", "bash", "zsh", "dash", "fish"}
+# Words before the command itself.
+KEYWORDS = {"{", "}", "!", "if", "then", "else", "elif", "fi", "do", "done", "while", "until", "time"}
+PREFIXES = {"sudo", "command", "builtin", "exec", "env", "nohup", "nice", "timeout", "caffeinate"}
+ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+WRITE_REDIRECTS = {">", ">>", ">|", ">&", "&>", "&>>", "<>"}
 # Where a path may start in a command: after a space, a quote or a shell operator.
 DELIMITERS = " \t\n\"'`=(;&|<>:"
 # A segment that may be EVY's, at the start of a path or after a slash.
@@ -83,7 +112,190 @@ def name_at(text, start):
     return name.split()[0] if name.split() else name
 
 
-def command_hits(text, cwd):
+class Unreadable(Exception):
+    pass
+
+
+def words(text):
+    """The simple commands of a shell command line, each a list of ("word", text), ("redirect", operator, target)
+    and ("heredoc", body). Raises Unreadable for a quote left open."""
+    commands = [[]]
+    state = {"word": None, "redirect": None, "heredocs": []}
+
+    def end_word():
+        word = state["word"]
+        if word is None:
+            return
+        state["word"] = None
+        if state["redirect"]:
+            operator = state["redirect"]
+            state["redirect"] = None
+            if operator in ("<<", "<<-"):
+                state["heredocs"].append((word, operator == "<<-", commands[-1]))
+            else:
+                commands[-1].append(("redirect", operator, word))
+        else:
+            commands[-1].append(("word", word))
+
+    def next_command():
+        end_word()
+        if commands[-1]:
+            commands.append([])
+
+    def add(chars):
+        state["word"] = (state["word"] or "") + chars
+
+    i, n = 0, len(text)
+    while i < n:
+        c = text[i]
+        if c == "\\":
+            if i + 1 < n and text[i + 1] != "\n":
+                add(text[i + 1])
+            i += 2
+        elif c == "'":
+            end = text.find("'", i + 1)
+            if end < 0:
+                raise Unreadable()
+            add(text[i + 1:end])
+            i = end + 1
+        elif c == '"':
+            j, held = i + 1, []
+            while j < n and text[j] != '"':
+                if text[j] == "\\" and j + 1 < n and text[j + 1] in '"\\$`\n':
+                    held.append(text[j + 1])
+                    j += 2
+                    continue
+                held.append(text[j])
+                j += 1
+            if j >= n:
+                raise Unreadable()
+            add("".join(held))
+            i = j + 1
+        elif c == "#" and state["word"] is None:
+            end = text.find("\n", i)
+            i = n if end < 0 else end
+        elif c in " \t":
+            end_word()
+            i += 1
+        elif c == "\n":
+            next_command()
+            i += 1
+            for delimiter, tabs, command in state["heredocs"]:
+                body = []
+                while i < n:
+                    end = text.find("\n", i)
+                    line = text[i:] if end < 0 else text[i:end]
+                    i = n if end < 0 else end + 1
+                    if (line.lstrip("\t") if tabs else line) == delimiter:
+                        break
+                    body.append(line)
+                command.append(("heredoc", "\n".join(body)))
+            state["heredocs"] = []
+        elif c in "<>" or (c == "&" and text[i + 1:i + 2] == ">"):
+            if state["word"] is not None and state["word"].isdigit() and text[i - 1:i].isdigit():
+                state["word"] = None
+            end_word()
+            for operator in ("&>>", "&>", "<<<", "<<-", "<<", "<>", "<&", ">>", ">|", ">&", ">", "<"):
+                if text.startswith(operator, i):
+                    break
+            i += len(operator)
+            state["redirect"] = operator
+        elif c in ";|&()`" or (c == "$" and text[i + 1:i + 2] == "("):
+            next_command()
+            i += 2 if c == "$" else 1
+        else:
+            add(c)
+            i += 1
+    end_word()
+    for delimiter, tabs, command in state["heredocs"]:
+        command.append(("heredoc", ""))
+    return [command for command in commands if command]
+
+
+def options_off(args):
+    return [arg for arg in args if not arg.startswith("-")]
+
+
+def targets(verb, args, cwd):
+    """The paths a command writes, or None when it may write paths the guard cannot see (xargs)."""
+    if verb in CHANGES:
+        return options_off(args)
+    if verb in TARGETS:
+        if "-t" in args and args.index("-t") + 1 < len(args):
+            return [args[args.index("-t") + 1]]
+        paths = options_off(args)
+        return paths[-1:]
+    if verb in ("sed", "gsed", "perl") and any(re.match(r"^-[A-Za-z]*i", arg) or arg.startswith("--in-place") for arg in args):
+        return options_off(args)
+    if verb == "dd":
+        return [arg[3:] for arg in args if arg.startswith("of=")]
+    if verb in ("curl", "wget"):
+        flags = ("-o", "--output") if verb == "curl" else ("-O", "--output-document")
+        return [args[k + 1] for k, arg in enumerate(args[:-1]) if arg in flags]
+    if verb == "find":
+        actions = [k for k, arg in enumerate(args) if arg in ("-exec", "-execdir", "-ok", "-okdir")]
+        writes = "-delete" in args or any(k + 1 < len(args) and os.path.basename(args[k + 1]) in CHANGES | TARGETS for k in actions)
+        return options_off(args) if writes else []
+    if verb == "xargs":
+        rest = [arg for arg in args if not arg.startswith("-")]
+        return None if rest and os.path.basename(rest[0]) in CHANGES | TARGETS | {"sed", "perl", "git"} else []
+    if verb == "git":
+        k = 0
+        folder = cwd
+        while k < len(args) and args[k].startswith("-"):
+            if args[k] in ("-C", "-c") and k + 1 < len(args):
+                folder = absolute(args[k + 1], cwd) if args[k] == "-C" else folder
+                k += 1
+            k += 1
+        if k < len(args) and args[k] in GIT_WRITES:
+            return [folder or "."] + options_off(args[k + 1:])
+    return []
+
+
+def command_hits(text, cwd, depth=0):
+    if SCRIPT_WRITES.search(text):
+        return mentions_hit(text, cwd)
+    try:
+        commands = words(text)
+    except Unreadable:
+        return mentions_hit(text, cwd)
+    for command in commands:
+        for item in command:
+            if item[0] == "redirect" and item[1] in WRITE_REDIRECTS and item[2] not in HARMLESS \
+                    and not item[2].isdigit() and path_hits(item[2], cwd):
+                return True
+        args = [item[1] for item in command if item[0] == "word"]
+        while args and (args[0] in KEYWORDS or ASSIGNMENT.match(args[0])):
+            args.pop(0)
+        while args and os.path.basename(args[0]) in PREFIXES:
+            args.pop(0)
+            while args and (args[0].startswith("-") or ASSIGNMENT.match(args[0]) or args[0].replace(".", "").isdigit()):
+                args.pop(0)
+        if not args:
+            continue
+        verb, rest = os.path.basename(args[0]), args[1:]
+        if verb in ("cd", "pushd"):
+            folder = absolute((options_off(rest) or ["~"])[0], cwd)
+            cwd = folder or cwd
+            continue
+        if verb in SHELLS and depth < 3:
+            scripts = [rest[k + 1] for k, arg in enumerate(rest[:-1]) if re.match(r"^-[a-z]*c[a-z]*$", arg)]
+            scripts += [item[1] for item in command if item[0] == "heredoc"]
+            if any(command_hits(script, cwd, depth + 1) for script in scripts):
+                return True
+            continue
+        written = targets(verb, rest, cwd)
+        if written is None:
+            if mentions_hit(text, cwd):
+                return True
+            continue
+        if any(path_hits(path, cwd) for path in written):
+            return True
+    return False
+
+
+def mentions_hit(text, cwd):
+    """The older rule: a command that writes at all and names a path into EVY's folders."""
     text = text.replace("\\ ", " ")
     if not WRITES.search(text):
         return False
