@@ -96,6 +96,37 @@ evy_session_id() {
   printf '%s' "${EVY_SESSION_ID:-${CLAUDE_CODE_SESSION_ID:-}}" | tr -cd 'A-Za-z0-9_.:-' | head -c 200
 }
 
+# Which agent process runs this hook: the pid and start time of the nearest ancestor named claude (or codex), so a
+# session the app restarted (after an interrupt, or when it frees memory) reads as a new process although its session
+# id stays. EVY_AGENT_PROCESS overrides it (tests). Nothing when no such ancestor is found: a hook that cannot tell
+# says nothing rather than every turn.
+evy_agent_process() {
+  if [ -n "${EVY_AGENT_PROCESS:-}" ]; then printf '%s' "$EVY_AGENT_PROCESS"; return 0; fi
+  local pid="$PPID" comm
+  for _ in 1 2 3 4 5 6; do
+    case "$pid" in '' | *[!0-9]* | 0 | 1) return 0 ;; esac
+    comm="$(ps -o comm= -p "$pid" 2>/dev/null)"
+    case "$comm" in
+      *claude* | *codex*) printf '%s %s' "$pid" "$(ps -o lstart= -p "$pid" 2>/dev/null | tr -s ' ')"; return 0 ;;
+    esac
+    pid="$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')"
+  done
+  return 0
+}
+
+# On stdout, once for each new agent process of session dir $1: EVY's tools connect a moment after a restarted agent
+# starts its first turn, so they can be missing from the tool list then. Claude Code's ToolSearch waits for servers
+# that are still connecting; Codex has no such search, so it hears nothing.
+evy_restart_note() {
+  local dir="$1" now
+  [ "$EVY_KIND" = "claude-code" ] || return 0
+  now="$(evy_agent_process)"
+  [ -n "$now" ] || return 0
+  [ "$now" = "$(cat "$dir/agent-process" 2>/dev/null)" ] && return 0
+  printf '%s' "$now" > "$dir/agent-process"
+  printf '%s\n' "EVY: this agent process just started, so EVY's tools may still be connecting and missing from your tool list. If they are, load them with ToolSearch (query \"select:mcp__plugin_evy_planner__save_note\"), which waits for servers that are connecting, before you tell the person EVY is unavailable."
+}
+
 # The tasks session $1 claimed, as the hook after claim_task wrote them (QC7), comma separated.
 evy_claimed_tasks() {
   local dir

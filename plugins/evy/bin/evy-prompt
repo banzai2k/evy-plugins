@@ -2,8 +2,9 @@
 # Prompt hook: before each message the person sends in a folder linked to a space (or once the session claimed a
 # task), adds what is new in EVY since the session last heard (the person's replies on its tasks, its tasks that
 # changed state, Updates lines from other sessions, the chat and agents' decisions, notes people changed), each item
-# once, and tells EVY the session's turn started. Turns the person did not type hear it from evy-turn-news. Prints
-# nothing when nothing is new, when EVY is out of reach (after 4 seconds at most), and in runs.
+# once, and tells EVY the session's turn started. Turns the person did not type hear it from evy-turn-news. The first
+# message after the agent process (re)started also hears that EVY's tools may still be connecting and how to wait for
+# them. Prints nothing when nothing is new, when EVY is out of reach (after 4 seconds at most), and in runs.
 . "$(dirname "$0")/evy-lib.sh"
 
 [ "${COMPASS_RUNNER:-}" = "1" ] && exit 0
@@ -18,5 +19,6 @@ folder="${folder:-$PWD}"
 { [ -f "$dir/linked" ] || [ -f "$dir/claimed" ]; } || exit 0
 # This turn heard the news: the hook after its first tool call need not ask again (PLG2).
 : > "$dir/turn-open"
+evy_restart_note "$dir"
 evy_news "$session" "$folder"
 exit 0
