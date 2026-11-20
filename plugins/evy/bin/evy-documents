@@ -93,7 +93,7 @@ while IFS="$tab" read -r made path; do
   max=0
   case "$(printf '%s' "$path" | tr 'A-Z' 'a-z')" in
     *.md | *.markdown | *.mdx) max=1048576 ;;
-    *.csv | *.tsv) max=2097152 ;;
+    *.csv | *.tsv | *.xlsx) max=2097152 ;;
     *.html | *.htm) max=400000 ;;
   esac
   set -- --form-string "path=$shown" --form-string "new=$made" --form-string "kind=$kind" \
