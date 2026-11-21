@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Refuses an edit in EVY's read-only copy of a space's notes (SYNC1): `00 Start here.md`, the numbered folders
 # from `02 Private notes` to `10 Tables`, and the `Knowledge` and `Private notes` folders of an older EVY
-# Desktop. Write the note with save_note, or finish the task with report. `01 Assets` is where runs save their
+# Desktop. Change a note's words with edit_note, write a new one with save_note, or finish the task with report. `01 Assets` is where runs save their
 # files (LF1), so it stays open. Only a space folder EVY made counts: one holding `00 Start here.md` or EVY's
 # snapshot list, or a Knowledge copy with its `.git` file. A file elsewhere named like a numbered folder, say a
 # slide "01 The problem.html", is left alone, and so are EVY's own tools, which write nothing on this Mac.
@@ -20,8 +20,9 @@ import re
 import sys
 
 REASON = (
-    "EVY's numbered folders are a read-only copy. Save the note in EVY with save_note (it answers with the "
-    "note's link for your reply), or finish the task with report. Do not edit 00 Start here.md, 02 Private notes, 03 Plans "
+    "EVY's numbered folders are a read-only copy. To change a note's words, edit it in EVY with edit_note (find its id "
+    "with knowledge_search); save a new note with save_note (it answers with the note's link for your reply), or "
+    "finish the task with report. Do not edit 00 Start here.md, 02 Private notes, 03 Plans "
     "and the other numbered folders, or Knowledge or Private notes. Files you make go in 01 Assets."
 )
 ASSETS = "01 Assets"
