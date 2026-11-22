@@ -8,7 +8,7 @@ EVY is a free workspace for people and agents. It runs on the Claude or ChatGPT 
 - Search your notes and read them in full, with their source and date.
 - List and read your tasks, start one and report it when it is done.
 - Save finished work as a note, add a task, save a plan with steps, and record a decision.
-- Suggest edits to a note, and read and answer the comments on it.
+- Edit a note, and read and answer the comments on it.
 
 Claude asks before it changes anything that cannot be undone.
 
