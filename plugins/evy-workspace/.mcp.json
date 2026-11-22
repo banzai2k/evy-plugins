@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "evy": {
+      "type": "http",
+      "url": "https://my.evy.so/mcp"
+    }
+  }
+}

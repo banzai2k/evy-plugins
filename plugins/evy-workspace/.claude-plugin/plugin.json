@@ -1,0 +1,16 @@
+{
+  "name": "evy-workspace",
+  "displayName": "EVY",
+  "version": "1.0.0",
+  "description": "Your EVY workspace in Claude: read your spaces, plans, tasks and notes, save finished work as notes, add tasks and record decisions.",
+  "author": { "name": "Helix Studio OÜ", "email": "help@evy.so", "url": "https://evy.so" },
+  "homepage": "https://evy.so",
+  "repository": "https://github.com/banzai2k/evy-plugins",
+  "license": "MIT",
+  "keywords": ["evy", "workspace", "planning", "tasks", "notes", "knowledge"],
+  "icon": "./logo.png",
+  "documentationUrl": "https://evy.so/support/",
+  "supportUrl": "https://evy.so/support/",
+  "privacyPolicyUrl": "https://evy.so/privacy-policy/",
+  "termsOfServiceUrl": "https://evy.so/terms-of-service/"
+}
