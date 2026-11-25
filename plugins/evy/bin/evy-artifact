@@ -3,14 +3,13 @@
 # made in a space's folder reaches that space's Assets as made by the session (AF1), tied to the task the session
 # claimed when there is one. Before, EVY only knew an artifact a report listed or a note linked. Only a publish of a
 # page: an asset upload, a read, a list or a delete sends nothing. The title is the page's own <title>, else the one
-# the tool was given. Runs in the background and never holds up the turn. Reads JSON with macOS's plutil; elsewhere
-# it does nothing. EVY_SHIP_WAIT=1 sends in the foreground (the tests).
+# the tool was given. Runs in the background and never holds up the turn. Reads JSON with macOS's plutil, else jq or
+# python3 (PIC1). EVY_SHIP_WAIT=1 sends in the foreground (the tests).
 . "$(dirname "$0")/evy-lib.sh"
 
 EVY_INPUT="$(cat)"
-command -v plutil >/dev/null 2>&1 || exit 0
-# plutil prints a missing key's error on stdout, so a failed read must give nothing.
-json() { local value; value="$(printf '%s' "$2" | plutil -extract "$1" raw -o - - 2>/dev/null)" || return 1; printf '%s' "$value"; }
+evy_json_ready || exit 0
+json() { evy_json_get "$1" "$2"; }
 action="$(json tool_input.action "$EVY_INPUT")"
 [ -z "$action" ] || [ "$action" = publish ] || exit 0
 [ "$(json tool_input.asset "$EVY_INPUT")" = true ] && exit 0

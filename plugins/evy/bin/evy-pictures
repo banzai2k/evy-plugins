@@ -2,21 +2,28 @@
 # After EVY's report tool: uploads the picture files the report lists (a run's screenshots, images it made) to EVY, so
 # every page can show them (QA3). They often sit in the session's scratchpad, outside the space folders, where EVY
 # Desktop may not read them and no browser can. Asks EVY for the task's list as it stored it, then sends each picture
-# file found on this Mac; EVY points the entry at its stored copy. A Markdown file the report lists goes up the same
-# way and becomes a note waiting in Review, since a note never sits in Assets (QA8), and a CSV or TSV table (or an Excel sheet) goes up as
-# a copy, so its result page shows it as a table while the file stays on the Mac (RA4). A write-up (FR6) goes up as its
-# text, which its result page shows in place; it becomes no note. A deck's slide pages go up too, and once EVY has them
-# all the deck becomes a note in Decks (NF3). Runs in the background and never
-# holds up the turn. Reads JSON with macOS's plutil; elsewhere it does nothing. EVY_SHIP_WAIT=1 sends in the foreground
-# (the tests).
+# file found on this machine; EVY points the entry at its stored copy. A Markdown file the report lists goes up the
+# same way and becomes a note waiting in Review, since a note never sits in Assets (QA8), and a CSV or TSV table (or an
+# Excel sheet) goes up as a copy, so its result page shows it as a table while the file stays where it is (RA4). A
+# write-up (FR6) goes up as its text, which its result page shows in place; it becomes no note. A deck's slide pages go
+# up too, and once EVY has them all the deck becomes a note in Decks (NF3). A report may name its task by its handle:
+# the task's id then comes from the tool's answer. A file that is missing, too big or refused gets one plain line in
+# the task's activity, so a picture that never arrived is never silent (PIC1); EVY_PICTURES_TALLY=<file> writes each
+# file's outcome there instead (the catch-up script). Runs in the background and never holds up the turn. Reads JSON
+# with macOS's plutil, else jq or python3 (a Linux build box). EVY_SHIP_WAIT=1 sends in the foreground (the tests).
 . "$(dirname "$0")/evy-lib.sh"
 
 EVY_INPUT="$(cat)"
-command -v plutil >/dev/null 2>&1 || exit 0
-# plutil prints a missing key's error on stdout, so a failed read must give nothing.
-json() { local value; value="$(printf '%s' "$2" | plutil -extract "$1" raw -o - - 2>/dev/null)" || return 1; printf '%s' "$value"; }
+evy_json_ready || exit 0
+json() { evy_json_get "$1" "$2"; }
+uuid='[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
 id="$(json tool_input.id "$EVY_INPUT")"
-printf '%s' "$id" | grep -Eq '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' || exit 0
+if ! printf '%s' "$id" | grep -Eqx "$uuid"; then
+  # A handle (PIC1): the report tool takes one, and its answer starts with the task, so its first id is the task's.
+  [ -n "$id" ] || exit 0
+  id="$(printf '%s' "$EVY_INPUT" | tr -d '\n' | sed -n 's/.*"tool_response"//p' | grep -oE "$uuid" | head -n 1)"
+  [ -n "$id" ] || exit 0
+fi
 base="$(evy_base)" || exit 0
 token="$(evy_token "$EVY_KIND")" || exit 0
 [ -n "$token" ] || exit 0
@@ -30,8 +37,42 @@ MAX_SLIDE_BYTES=$((400 * 1000))
 # The token goes to curl on stdin, never on its command line where other processes could read it.
 call() { printf 'header = "Authorization: Bearer %s"\n' "$token" | curl -sS -K - "$@"; }
 
+# This machine as the activity line names it: the build box by its runner's name, a Mac as this Mac.
+machine() {
+  evy_env_value RUNNER_HOST && return 0
+  [ "$(uname -s 2>/dev/null)" = Darwin ] && { printf 'this Mac'; return 0; }
+  hostname -s 2>/dev/null || printf 'this machine'
+}
+
+size_words() {
+  if [ "$1" -ge 1048576 ]; then printf '%s MB' $(($1 / 1048576)); else printf '%s KB' $(($1 / 1000)); fi
+}
+
+# One file's outcome: "sent", or a reason it did not go up, which the activity line collects.
+missed=""
+outcome() {
+  local state="$1" path="$2" why="$3"
+  if [ -n "${EVY_PICTURES_TALLY:-}" ]; then
+    printf '%s\t%s\t%s\t%s\n' "$id" "$state" "$path" "$why" >> "$EVY_PICTURES_TALLY"
+    return 0
+  fi
+  [ "$state" = sent ] && return 0
+  missed="${missed:+$missed; }${path##*/} ($why)"
+}
+
+# The one plain line in the task's activity when something did not go up, never in the person's result.
+tell() {
+  [ -n "$missed" ] || return 0
+  local line payload
+  line="Files from this report that did not reach EVY, so their pages cannot show them: $missed."
+  payload="{\"body\":$(evy_json "$line"),\"meta\":{\"activity\":true,\"uploads\":\"missed\"}}"
+  call --max-time 10 -o /dev/null -H "Content-Type: application/json" --data-binary "$payload" \
+    "$base/runner/api/tasks/$id/comments" 2>/dev/null
+  return 0
+}
+
 send() {
-  local task count i kind path type file size where max
+  local task count i kind path type file size where max answer status error
   task="$(call --max-time 10 "$base/runner/api/tasks/$id")" || return 0
   count="$(json task.outputs "$task")" || return 0
   i=0
@@ -68,12 +109,28 @@ send() {
     esac
     file="$path"
     case "$file" in "~/"*) file="$HOME/${file#\~/}" ;; esac
-    [ -f "$file" ] && [ -r "$file" ] || continue
+    if ! [ -f "$file" ] || ! [ -r "$file" ]; then
+      outcome missing "$path" "no such file on $(machine)"
+      continue
+    fi
     size="$(wc -c < "$file" | tr -d ' ')"
-    [ "$size" -le "$max" ] 2>/dev/null || continue
-    call --max-time 60 -o /dev/null --form-string "path=$path" -F "file=@\"$file\"" \
-      "$base/runner/api/tasks/$id/$where" 2>/dev/null
+    if ! [ "$size" -le "$max" ] 2>/dev/null; then
+      outcome too_big "$path" "larger than the $(size_words "$max") EVY takes"
+      continue
+    fi
+    answer="$(call --max-time 60 -w '\n%{http_code}' --form-string "path=$path" -F "file=@\"$file\"" \
+      "$base/runner/api/tasks/$id/$where" 2>/dev/null)"
+    status="${answer##*$'\n'}"
+    case "$status" in
+      2??) outcome sent "$path" "" ;;
+      000 | "") outcome failed "$path" "EVY could not be reached" ;;
+      *)
+        error="$(json error "${answer%$'\n'*}")" || error=""
+        outcome failed "$path" "EVY refused it${error:+: $error}"
+        ;;
+    esac
   done
+  tell
   return 0
 }
 

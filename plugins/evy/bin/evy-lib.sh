@@ -72,6 +72,58 @@ evy_json() {
   printf '"%s"' "$(printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' | tr -d '\000-\037')"
 }
 
+# One value of the JSON in $2 at key path $1 ("task.outputs.0.path"), printed raw: a string as it is, a number or
+# true/false as text, a list as how many items it holds. A missing or null value prints nothing and fails. macOS's
+# plutil where it exists, as always; elsewhere (a Linux build box has no plutil, PIC1) jq, else python3.
+EVY_JQ_RAW='reduce ($p | split(".")[]) as $k (.;
+  if type == "array" and ($k | test("^[0-9]+$")) then .[$k | tonumber]
+  elif type == "object" and has($k) then .[$k]
+  else error("missing") end)
+| if type == "array" then length elif type == "string" or type == "number" or type == "boolean" then tostring
+  else error("missing") end'
+EVY_PY_RAW='import json, sys
+value = json.load(sys.stdin)
+for key in sys.argv[1].split("."):
+    if isinstance(value, list) and key.isdigit() and int(key) < len(value):
+        value = value[int(key)]
+    elif isinstance(value, dict) and key in value:
+        value = value[key]
+    else:
+        sys.exit(1)
+if value is None or isinstance(value, dict):
+    sys.exit(1)
+if isinstance(value, bool):
+    value = "true" if value else "false"
+elif isinstance(value, list):
+    value = str(len(value))
+elif not isinstance(value, str):
+    value = json.dumps(value)
+sys.stdout.write(value)'
+evy_json_get() {
+  local value
+  if command -v plutil >/dev/null 2>&1; then
+    # plutil prints a missing key's error on stdout, so a failed read must give nothing.
+    value="$(printf '%s' "$2" | plutil -extract "$1" raw -o - - 2>/dev/null)" || return 1
+  elif command -v jq >/dev/null 2>&1; then
+    value="$(printf '%s' "$2" | jq -r --arg p "$1" "$EVY_JQ_RAW" 2>/dev/null)" || return 1
+  elif command -v python3 >/dev/null 2>&1; then
+    value="$(printf '%s' "$2" | PYTHONIOENCODING=utf-8 python3 -I -c "$EVY_PY_RAW" "$1" 2>/dev/null)" || return 1
+  else
+    return 1
+  fi
+  printf '%s' "$value"
+}
+
+# The SHA-256 of file $1 in hex: shasum on a Mac, sha256sum where shasum is missing.
+evy_sha256() {
+  if command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | cut -d ' ' -f 1; else sha256sum "$1" | cut -d ' ' -f 1; fi
+}
+
+# Whether this machine has a way to read JSON for evy_json_get.
+evy_json_ready() {
+  command -v plutil >/dev/null 2>&1 || command -v jq >/dev/null 2>&1 || command -v python3 >/dev/null 2>&1
+}
+
 # A string field of the hook's JSON input on stdin, saved in EVY_INPUT ("session_id", "cwd", ...).
 evy_field() {
   printf '%s' "$EVY_INPUT" | tr -d '\n' | sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -n 1

@@ -6,15 +6,14 @@
 # stays where the agent saved it. A new file comes in; an edit updates what EVY already took in and nothing else. Code
 # stays out: a file in a git repository that holds code, in a hidden folder, and an agent's working files (EVY checks
 # those again). The agent hears the link to put in its reply. Only in a session EVY knows (a linked folder, a claimed
-# task, a run); prints nothing when EVY leaves the file alone or is out of reach. Reads JSON with macOS's plutil;
-# elsewhere it does nothing.
+# task, a run); prints nothing when EVY leaves the file alone or is out of reach. Reads JSON with macOS's plutil,
+# else jq or python3 (PIC1).
 . "$(dirname "$0")/evy-lib.sh"
 
 EVY_INPUT="$(cat)"
-command -v plutil >/dev/null 2>&1 || exit 0
+evy_json_ready || exit 0
 [ -n "$(evy_field agent_id)" ] && exit 0
-# plutil prints a missing key's error on stdout, so a failed read must give nothing.
-json() { local value; value="$(printf '%s' "$2" | plutil -extract "$1" raw -o - - 2>/dev/null)" || return 1; printf '%s' "$value"; }
+json() { evy_json_get "$1" "$2"; }
 
 is_document() {
   printf '%s' "$1" | grep -Eiq '\.(md|markdown|mdx|csv|tsv|html?|pdf|docx|xlsx|pptx)$' || return 1
@@ -98,7 +97,7 @@ while IFS="$tab" read -r made path; do
   esac
   set -- --form-string "path=$shown" --form-string "new=$made" --form-string "kind=$kind" \
     --form-string "session=$session" --form-string "tasks=$tasks" --form-string "folder=$folder" \
-    --form-string "repo_folder=$repo" --form-string "sha256=$(shasum -a 256 "$path" | cut -d ' ' -f 1)"
+    --form-string "repo_folder=$repo" --form-string "sha256=$(evy_sha256 "$path")"
   if [ "$max" -gt 0 ]; then
     [ "$size" -le "$max" ] 2>/dev/null || continue
     set -- "$@" -F "file=@\"$path\""
