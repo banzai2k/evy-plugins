@@ -6,7 +6,8 @@
 # same way and becomes a note waiting in Review, since a note never sits in Assets (QA8), and a CSV or TSV table (or an
 # Excel sheet) goes up as a copy, so its result page shows it as a table while the file stays where it is (RA4). A
 # write-up (FR6) goes up as its text, which its result page shows in place; it becomes no note. A deck's slide pages go
-# up too, and once EVY has them all the deck becomes a note in Decks (NF3). A report may name its task by its handle:
+# up too, and once EVY has them all the deck becomes a note in Decks (NF3), and so do a design's version pages (PHS1),
+# which EVY keeps in their entries (a big one as a file beside the task, DSN1) so every page shows them. A report may name its task by its handle:
 # the task's id then comes from the tool's answer. A file that is missing, too big or refused gets one plain line in
 # the task's activity, so a picture that never arrived is never silent (PIC1); EVY_PICTURES_TALLY=<file> writes each
 # file's outcome there instead (the catch-up script). Runs in the background and never holds up the turn. Reads JSON
@@ -32,7 +33,10 @@ MAX_BYTES=$((15 * 1024 * 1024))
 MAX_NOTE_BYTES=$((1024 * 1024))
 MAX_TABLE_BYTES=$((2 * 1024 * 1024))
 MAX_WRITEUP_BYTES=$((200 * 1000))
-MAX_SLIDE_BYTES=$((400 * 1000))
+# A design or slide page that carries its screenshots and fonts passes 400 KB at once; EVY keeps a big one as a file
+# beside the task, up to the picture limit (DSN1).
+MAX_SLIDE_BYTES=$MAX_BYTES
+MAX_DESIGN_BYTES=$MAX_BYTES
 
 # The token goes to curl on stdin, never on its command line where other processes could read it.
 call() { printf 'header = "Authorization: Bearer %s"\n' "$token" | curl -sS -K - "$@"; }
@@ -81,7 +85,8 @@ send() {
     path="$(json "task.outputs.$i.path" "$task")"
     type="$(json "task.outputs.$i.type" "$task")"
     i=$((i + 1))
-    # Only files: pictures (a screenshot, an image, or a file named like one), Markdown notes, tables and write-ups.
+    # Only files: pictures (a screenshot, an image, or a file named like one), Markdown notes, tables, write-ups,
+    # slides and design pages.
     [ "$kind" = file ] && [ -n "$path" ] || continue
     where=pictures max=$MAX_BYTES
     case "$type" in
@@ -93,6 +98,11 @@ send() {
       slide)
         printf '%s' "$path" | grep -Eiq '\.html?$' || continue
         where=slides max=$MAX_SLIDE_BYTES
+        ;;
+      design)
+        # A design version's page (PHS1): from a build box no Mac can open it, so EVY keeps it in the entry.
+        printf '%s' "$path" | grep -Eiq '\.html?$' || continue
+        where=designs max=$MAX_DESIGN_BYTES
         ;;
       "" | document)
         # A Markdown file or table reported as a document is a note or a table too (RF2).

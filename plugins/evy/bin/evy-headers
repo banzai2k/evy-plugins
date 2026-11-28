@@ -1,7 +1,8 @@
 #!/bin/bash
 # The headers Claude Code (or Codex) sends to EVY's tools: this Mac's agent token, read from EVY Desktop's env file at
 # each connection, so it never sits in a config file, the folder the session works in, and the session's id where the
-# agent gives it (so EVY ties tool calls to the tasks the session claimed). Usage: evy-headers [folder]
+# agent gives it (so EVY ties tool calls to the tasks the session claimed), and for Claude Code the plugin's version.
+# Usage: evy-headers [folder]
 . "$(dirname "$0")/evy-lib.sh"
 
 folder="${1:-$PWD}"
@@ -23,4 +24,10 @@ repo="$(evy_repo_folder "$folder")"
 [ -n "$repo" ] && out="$out,\"X-EVY-Repo-Folder\":$(evy_json "$repo")"
 session="$(evy_session_id)"
 [ -n "$session" ] && out="$out,\"X-EVY-Session\":$(evy_json "$session")"
+# Claude Code runs the plugin's upload hook after each report; its version tells EVY which files that hook sends
+# (PHS1: design pages from a build box), so EVY never asks the agent again for pages on their way. Codex has no such hook.
+if [ "$EVY_KIND" = "claude-code" ]; then
+  version="$(evy_plugin_version)"
+  [ -n "$version" ] && out="$out,\"X-EVY-Plugin\":$(evy_json "$version")"
+fi
 printf '%s}\n' "$out"
